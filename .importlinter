@@ -1,0 +1,123 @@
+; Dependency contracts — Arch §4.
+;
+; "Dependencies point downward only. This is what keeps the shared/tenant
+;  boundary from eroding as features accrete."
+;
+; Run with `lint-imports`. These block deployment (Arch §5.4) — a contract
+; failure here is the same class of problem as a failing tenancy test, because
+; it is how the tenancy tests start passing for the wrong reason.
+
+[importlinter]
+root_package = apps
+
+; ── The layer stack ─────────────────────────────────────────────────────────
+; Highest first. Apps on the same line are siblings: neither may import the
+; other. `apps.operations` is deliberately absent — see the note below.
+
+[importlinter:contract:layers]
+name = Layered architecture, downward only
+type = layers
+layers =
+    apps.portal : apps.billing
+    apps.publication
+    apps.outputs
+    apps.scoring
+    apps.clients
+    apps.intelligence
+    apps.research
+    apps.enrichment
+    apps.domains
+    apps.evidence
+    apps.ingestion
+    apps.connectors
+    apps.sources
+    apps.tenancy
+
+; `apps.operations` is cross-cutting: it owns the audit log and cost ledger,
+; which higher layers write to, while its dashboard reads run and connector
+; health from lower ones. Forcing it into the stack would either block the
+; writes or block the dashboard. It is excluded from the layers contract and
+; constrained by the explicit contracts below instead.
+
+; ── The two rules the architecture names by hand ────────────────────────────
+
+[importlinter:contract:evidence-stays-global]
+name = Evidence is tenant-agnostic (Arch §4)
+type = forbidden
+source_modules =
+    apps.evidence
+    apps.ingestion
+    apps.connectors
+    apps.sources
+    apps.domains
+    apps.enrichment
+    apps.intelligence
+    apps.research
+forbidden_modules =
+    apps.clients
+    apps.scoring
+    apps.outputs
+    apps.publication
+    apps.portal
+    apps.billing
+; The L2/L5 boundary is "the single most important line in the system"
+; (Arch §3). Below it, data is shared across every client — which is why
+; client #2 costs a fraction of client #1. Pulling tenant context below L5 is
+; an architectural violation regardless of how convenient it seems.
+
+[importlinter:contract:gate-is-the-only-door]
+name = The portal reaches content only through publication (Arch §9.3)
+type = forbidden
+source_modules =
+    apps.portal
+forbidden_modules =
+    apps.outputs
+; "The portal resolves content exclusively through a Publication record. There
+;  is no query path from portal views to Output or OutputVersion."
+; Approval is not publication. If this contract ever needs relaxing, the thing
+; that needs changing is the design, not this file.
+
+; ── What the portal must never be able to reach at all ──────────────────────
+
+[importlinter:contract:portal-sees-nothing-internal]
+name = The tenant plane cannot reach evidence, scoring or cost (PRD §3.2)
+type = forbidden
+source_modules =
+    apps.portal
+forbidden_modules =
+    apps.sources
+    apps.connectors
+    apps.ingestion
+    apps.evidence
+    apps.enrichment
+    apps.intelligence
+    apps.scoring
+    apps.operations
+; PRD §3.2: an Org Admin never sees "raw evidence, internal scores, vendor
+; costs, other orgs, pre-publication content". Enforcing it at the import level
+; means a portal template cannot render what a portal module cannot import.
+
+[importlinter:contract:tenancy-depends-on-nothing]
+name = Tenancy sits below everything
+type = forbidden
+source_modules =
+    apps.tenancy
+forbidden_modules =
+    apps.sources
+    apps.connectors
+    apps.ingestion
+    apps.evidence
+    apps.domains
+    apps.enrichment
+    apps.intelligence
+    apps.research
+    apps.clients
+    apps.scoring
+    apps.outputs
+    apps.publication
+    apps.portal
+    apps.billing
+    apps.operations
+; The default-deny manager is imported by every tenant-scoped app. If tenancy
+; ever imports upward, that cycle will be resolved by someone weakening the
+; manager, which is the one thing that must not happen.

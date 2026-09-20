@@ -1,0 +1,122 @@
+# Arch §11.1 — one VPS, Docker Compose.
+#
+# Nine services. Not "everything": S3-compatible object storage and the nightly
+# pg_dump both live off-box, and the acquisition vendors are external services
+# behind adapters.
+#
+# Anti-goals, per Arch §1: no Kubernetes, no managed services, no microservices.
+# §11.2 gives the reason — at a ~$389/month ceiling, managed Postgres alone
+# would consume a meaningful share of it.
+
+name: trend-engine
+
+x-django: &django
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  env_file: [.env]
+  volumes:
+    - ../:/app
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_started}
+  restart: unless-stopped
+
+services:
+  # ── Edge ──────────────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - static:/srv/static:ro
+    depends_on: [web-ops, web-portal]
+    restart: unless-stopped
+
+  # ── Two WSGI processes, one codebase (Arch §5.3, §11.1) ───────────────────
+  # Separate entry points give the planes independent middleware stacks and
+  # make it impossible for portal traffic to load operator URL routing at all.
+  web-ops:
+    <<: *django
+    command: gunicorn config.wsgi_ops:application --bind 0.0.0.0:8000 --workers 3
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.ops
+    volumes:
+      - ../:/app
+      - static:/app/staticfiles
+
+  web-portal:
+    <<: *django
+    command: gunicorn config.wsgi_portal:application --bind 0.0.0.0:8000 --workers 2
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.portal
+    volumes:
+      - ../:/app
+      - static:/app/staticfiles
+
+  # ── Three queues, deliberately (Arch §11.1) ───────────────────────────────
+  # "Mixing these into one queue is the classic failure: a batch of
+  #  transcriptions starves a user-facing export."
+  worker-ingest:
+    <<: *django
+    command: celery -A config worker -Q ingest -c 8 -l info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.ops
+
+  worker-enrich:
+    <<: *django
+    # Low concurrency on purpose: LLM-bound, rate-limit aware, cost-capped.
+    command: celery -A config worker -Q enrich -c 2 -l info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.ops
+
+  worker-default:
+    <<: *django
+    # Short tasks — exports and email — that must never queue behind a
+    # 40-minute transcription job.
+    command: celery -A config worker -Q default -c 4 -l info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.ops
+
+  beat:
+    <<: *django
+    command: celery -A config beat -l info --schedule /tmp/celerybeat-schedule
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.ops
+
+  # ── Data ──────────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    env_file: [.env]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    # ADR #10 accepts self-hosted Postgres knowingly: "operational burden;
+    # mitigated by tested restores". The volume below plus the nightly off-box
+    # dump and the WEEKLY RESTORE TEST are the entire safety net. Arch §11.3 is
+    # blunt about it — an untested backup is not a backup.
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  static:
+  caddy_data:
+  caddy_config:

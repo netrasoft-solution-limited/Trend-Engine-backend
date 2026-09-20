@@ -1,0 +1,44 @@
+# Arch §11.1 — TLS termination and plane routing.
+#
+# The two planes differ in network exposure as well as in code:
+#   /portal/*  public internet, invite-only accounts
+#   /ops/*     identity-aware or IP-restricted — never simply public
+#
+# Path-based routing here matches the cookie paths in the settings modules, so
+# a browser holding an operator session will not send it to a portal URL.
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	# Static assets, served by Caddy rather than Django.
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	# ── Tenant plane ────────────────────────────────────────────────────────
+	handle /portal/* {
+		reverse_proxy web-portal:8000
+	}
+
+	# ── Operator plane ──────────────────────────────────────────────────────
+	# Restrict before launch. The PRD calls the internal tool "private /
+	# identity-aware; not public" (§7.1) — leaving this open is the cheapest
+	# way to undo the whole two-realm design.
+	handle /ops/* {
+		# @allowed remote_ip {$OPS_ALLOWED_IPS}
+		# abort @not_allowed
+		reverse_proxy web-ops:8000
+	}
+
+	handle {
+		redir /portal/ permanent
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
