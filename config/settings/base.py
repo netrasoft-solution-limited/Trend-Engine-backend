@@ -1,9 +1,13 @@
 """Settings shared by both planes.
 
-This module installs no auth backend, no session cookie and no tenant
-middleware. Those differ per plane and are set in `ops.py` and `portal.py` —
-keeping them out of here means neither plane can inherit the other's by
-accident.
+What is deliberately NOT here: the auth backend, the user model, the session
+and CSRF cookie *names and paths*, the tenant middleware, and `TENANT_PLANE`.
+Those differ per plane and are set in `ops.py` and `portal.py` — keeping them
+out of this module means neither plane can inherit the other's by accident.
+
+What IS here: the cookie security flags, the password policy and the session
+machinery, which must be identical on both planes. A weaker password rule on
+one plane than the other would be a silent asymmetry.
 """
 from __future__ import annotations
 
@@ -36,6 +40,10 @@ DJANGO_APPS = [
     "django.contrib.staticfiles",
 ]
 
+THIRD_PARTY_APPS = [
+    "rest_framework",
+]
+
 LOCAL_APPS = [
     "apps.tenancy",       # L0  · tenant root and scoping
     "apps.sources",       # L1  · provider registry, policy versions
@@ -55,7 +63,20 @@ LOCAL_APPS = [
     "apps.operations",    # cross · health, cost, audit
 ]
 
-INSTALLED_APPS = DJANGO_APPS + LOCAL_APPS
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+
+# INSTALLED_APPS is IDENTICAL on both planes, on purpose. Excluding the
+# operator apps from the portal registry would be tempting, but it makes the
+# `migrate` plan diverge between the two settings modules, which destroys the
+# ability to assert that both produce the same schema (see the dual
+# `makemigrations --check` in CI). The planes are separated by URLconf,
+# AUTHENTICATION_BACKENDS, .importlinter and TENANT_PLANE — not by registry.
+
+#: Which plane this PROCESS serves. Overridden to "portal" in portal.py.
+#: `apps.tenancy.context.bind_operator_all()` refuses when this is "portal",
+#: which is what makes the refusal hold for Celery tasks and management
+#: commands, not only for requests that reached the middleware.
+TENANT_PLANE = "operator"
 
 # Middleware common to both planes. Each plane appends its own auth and tenant
 # binding — see ops.py and portal.py.
@@ -109,8 +130,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # ── Templates ───────────────────────────────────────────────────────────────
-# ADR #9: Django templates + HTMX. No SPA. The React prototype in ../frontend
-# is a design reference these templates are built from, not a deployed artifact.
+# ADR #9 as amended (Arch §15.1 A1): Django templates + HTMX for the OPERATOR
+# plane. The tenant plane is a React SPA against the JSON API in apps/portal,
+# so these templates currently serve email bodies and the operator UI only.
 
 TEMPLATES = [
     {
@@ -132,10 +154,66 @@ TEMPLATES = [
 # the original request was secure.
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SECURE = True
+
+# Secure by default. A plain-HTTP dev server cannot set a Secure cookie, so
+# local development opts out explicitly rather than the default being weak.
+# Note the `__Host-` cookie name also mandates Secure, so with this off the
+# dev settings must use an unprefixed name — see ops.py / portal.py.
+_INSECURE_COOKIES = env("DJANGO_INSECURE_COOKIES", "0") == "1"
+SESSION_COOKIE_SECURE = not _INSECURE_COOKIES
+CSRF_COOKIE_SECURE = not _INSECURE_COOKIES
+
+# The session cookie carries the identity; the CSRF token lives in the session
+# rather than a second cookie. One fewer cookie to path-scope correctly, and it
+# means a token cannot be read by script on either plane.
+CSRF_USE_SESSIONS = True
+
+# Argon2 first. This is a credentialed multi-tenant SaaS holding a client's
+# commercial intelligence; the default PBKDF2 is not the right trade here.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
+# PRD §7.1. Absent entirely before this — neither plane validated password
+# strength at all.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# DRF serves JSON to the React portal. Session authentication, not tokens: the
+# cookie stays HttpOnly and out of reach of script. Authorisation is decided
+# per view — there is no permissive default.
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "EXCEPTION_HANDLER": "config.api.exception_handler",
+}
+
+# PRD §13 leaves the transactional email provider undecided. Until it is
+# chosen, invites and password resets print to the console in development
+# and fail loudly in production rather than silently dropping.
+EMAIL_BACKEND = env(
+    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Trend Engine <no-reply@localhost>")
+PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:5173")
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

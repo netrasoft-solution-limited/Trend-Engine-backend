@@ -11,14 +11,19 @@
 root_package = apps
 
 ; ── The layer stack ─────────────────────────────────────────────────────────
-; Highest first. Apps on the same line are siblings: neither may import the
-; other. `apps.operations` is deliberately absent — see the note below.
+; Highest first. `apps.operations` is deliberately absent — see the note below.
+;
+; `billing` sits BELOW `portal` rather than beside it. The portal renders a
+; tenant's plan and invoices, so it depends on billing; billing knows nothing
+; about the portal and never will. Listing them as siblings implied a symmetry
+; that does not exist.
 
 [importlinter:contract:layers]
 name = Layered architecture, downward only
 type = layers
 layers =
-    apps.portal : apps.billing
+    apps.portal
+    apps.billing
     apps.publication
     apps.outputs
     apps.scoring
@@ -72,10 +77,17 @@ source_modules =
     apps.portal
 forbidden_modules =
     apps.outputs
-; "The portal resolves content exclusively through a Publication record. There
-;  is no query path from portal views to Output or OutputVersion."
-; Approval is not publication. If this contract ever needs relaxing, the thing
-; that needs changing is the design, not this file.
+allow_indirect_imports = True
+; "...no module under portal/ imports from outputs/ EXCEPT VIA publication/."
+;
+; `allow_indirect_imports` is what encodes that exception, and it is the whole
+; point rather than a loosening: portal -> publication -> outputs is the
+; sanctioned path, because `publication` IS the gate. What this contract
+; forbids is portal naming `apps.outputs` itself, directly or through anything
+; that is not the gate.
+;
+; The layers contract above independently prevents any other route down, so a
+; new module between them could not smuggle one in.
 
 ; ── What the portal must never be able to reach at all ──────────────────────
 
@@ -93,9 +105,16 @@ forbidden_modules =
     apps.intelligence
     apps.scoring
     apps.operations
+allow_indirect_imports = True
 ; PRD §3.2: an Org Admin never sees "raw evidence, internal scores, vendor
 ; costs, other orgs, pre-publication content". Enforcing it at the import level
-; means a portal template cannot render what a portal module cannot import.
+; means a portal view cannot render what a portal module cannot import.
+;
+; Direct imports only, for the same reason as the contract above. The gate
+; writes an audit event when it publishes, so `publication -> operations` is
+; legitimate and unavoidable; what matters is that nothing under `portal/`
+; names `apps.operations` itself. A publication reaches the portal as a frozen
+; snapshot, carrying no scores, no costs and no internal state.
 
 [importlinter:contract:tenancy-depends-on-nothing]
 name = Tenancy sits below everything

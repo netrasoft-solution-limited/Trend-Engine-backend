@@ -1,8 +1,11 @@
 # Trend Engine — backend
 
-A Django modular monolith. Structure only: directories, app configs, and real
-content in the files that carry an architectural rule. Models, views and
-migrations are deliberately empty — this is the skeleton the build fills in.
+A Django modular monolith, two authentication realms, one database.
+
+The **tenant plane** is built and working: real accounts, sessions, invites,
+multi-org membership, and the publication gate. The **operator plane** boots and
+owns its models but has no UI yet, and the evidence pipeline (L1–L4) is still
+the original skeleton.
 
 Derived from `../trend-engine-prd.md` and `../trend-engine-solution-architecture.md`.
 Those documents win any disagreement with this one.
@@ -68,11 +71,12 @@ every client, which is why client #2 costs a fraction of client #1.
 
 Screens from PRD §6.5 are owned by the app that owns their data: Triage and
 Signal Review by `scoring`, Ingestion Runs by `ingestion`, Resolution Queue by
-`evidence`, Organizations by `billing`, and so on. `../frontend` is the design
-reference these templates get built from — ADR #9 rejects an SPA, so it is not
-a deployed artifact.
+`evidence`, Organizations by `billing`, and so on. For the operator plane,
+`../frontend/src/ops` is the design reference those templates get built from —
+ADR #9 stands there. For the tenant plane it does not: `../frontend/src/portal`
+is a real client against `apps/portal`'s JSON API (Arch §15.1 A1).
 
-## Two deviations from Arch §4, flagged on purpose
+## Deviations from the architecture, flagged on purpose
 
 **`Organization` lives in `tenancy` (L0), not `billing` (L7).** Every
 tenant-scoped model from L5 up carries a foreign key to the tenant root, so
@@ -85,7 +89,21 @@ still maps 1:1 to Client, additively.
 `clients/managers.py` and labels it "conceptual shape". Six apps need the
 manager; putting it in one of them would make the other five import sideways.
 
-Both are open to being overruled — they are recorded here rather than buried.
+**`OrgUser`, `OrgMembership` and `OrgInvite` are NOT tenant-scoped.** They
+cannot be. `AuthenticationMiddleware` resolves `request.user` through the
+default manager *before* any tenant is bound — binding needs the user, and the
+user needs the query — so a scoped manager here deadlocks every authenticated
+request. `PortalBackend.authenticate()` has the same problem: it finds a user by
+email before any organisation is known. Do not "fix" this; it will take the
+portal down on the first login.
+
+**The `__Host-` cookie prefix forced the plane split.** Arch §5.3 paired
+`__Host-te_ops` with `Path=/ops`, which no browser accepts — the prefix requires
+`Path=/`. The planes now differ by origin instead (`ops.<domain>`), which is a
+stronger boundary anyway. Recorded as Arch §15.1 A2.
+
+All of these are open to being overruled — they are recorded rather than buried,
+here and in the architecture document's amendments table.
 
 ## The contracts
 
@@ -125,7 +143,27 @@ gone. Health and scientific outputs need a recorded expert sign-off *before*
 publication — stricter than approval, because publication is what reaches the
 client.
 
-## Running it
+## Running it locally
+
+```
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+docker run -d --name te-postgres -e POSTGRES_DB=trend_engine \
+  -e POSTGRES_USER=trend_engine -e POSTGRES_PASSWORD=dev \
+  -p 5433:5432 pgvector/pgvector:pg16
+docker run -d --name te-redis -p 6379:6379 redis:7-alpine
+
+source scripts/dev-env.sh
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py seed_demo          # prints the demo accounts
+
+DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000
+scripts/smoke-portal-api.sh                   # 21 checks over real HTTP
+```
+
+The React portal in `../frontend` proxies `/portal/api` to port 8000, so
+`npm run dev` there gives you the whole stack.
+
+## Running it as deployed
 
 ```
 cp deploy/.env.example deploy/.env    # fill it in
@@ -137,25 +175,51 @@ off-box; the acquisition vendors are external. No Kubernetes, no managed
 services, no microservices — all three are explicit anti-goals, and §11.2 gives
 the cost reason.
 
-```
-pytest -m tenancy          # the three blocking suites
-pytest -m publication      # the gate
-lint-imports               # the five contracts
-```
-
 `scripts/restore_test.sh` runs weekly against a disposable database and asserts
 the restored data is actually there — a dump of an empty database restores
 perfectly. Arch §11.3 makes this an acceptance criterion, not a nicety.
 
-## What is not here
+## Checks
 
-- **No models.** `models.py` in each app carries its PRD §8 group as a
-  docstring and nothing else.
-- **No migrations.** The first one must include the tenant-aware schema and
-  `Organization` (Arch §16).
-- **No views or templates.** `../frontend` is the reference for all fifteen
-  screens.
-- **`conftest.py` fixtures raise `NotImplementedError`** so the test suites read
-  as specifications now and fail loudly rather than passing vacuously.
-- **No CI workflow.** The contracts and the four blocking suites need one before
-  any of this is a real gate.
+```
+.venv/bin/python manage.py makemigrations --check --dry-run                                  # ops
+.venv/bin/python manage.py makemigrations --check --dry-run --settings=config.settings.portal
+lint-imports                          # the five dependency contracts
+scripts/smoke-portal-api.sh           # 21 checks over real HTTP
+```
+
+**The dual `makemigrations --check` is the important one.** Two settings modules
+declare different `AUTH_USER_MODEL` values over one migration history. That is
+safe only while no migration contains a `SettingsReference` — otherwise the same
+foreign key resolves to `operations_operatoruser` in one process and
+`portal_orguser` in the other, silently joining two identity tables on the same
+integer key. If both commands report "No changes detected", the migration set is
+provably settings-independent. Treat it as deployment-blocking, like
+`lint-imports`.
+
+## What is built
+
+- **The tenant realm.** `OrgUser`, `OrgMembership` (multi-org: the role lives on
+  the membership), `OrgInvite`, `PortalLoginEvent`, and a `PortalBackend`.
+- **The auth API** under `/portal/api/` — login, logout, session, org switch,
+  password reset, invite acceptance, team management. Session cookies, not
+  tokens. Rate-limited login, and both successes and failures audited.
+- **The publication gate**, for real. `publish` refuses an unapproved version
+  and refuses health/scientific content without a recorded expert sign-off;
+  `unpublish` is reversible and audited; a partial unique index enforces "one
+  live publication per output per tenant" in the database rather than in
+  application code that could race.
+- **The content API** — publications, deliveries, notifications, subscription.
+
+## What is not here yet
+
+- **The operator plane has no UI.** `config/urls_ops.py` includes app URLconfs
+  that are still empty. `manage.py` and the tests run under ops settings, so the
+  models and admin work; there are no operator views.
+- **The evidence pipeline** — L1 to L4 — is still the original skeleton. No
+  connectors, no ingestion, no scoring.
+- **`conftest.py` fixtures still raise `NotImplementedError`,** so the tenancy
+  suites read as specifications and do not yet assert. `scripts/smoke-portal-api.sh`
+  covers the same ground over HTTP in the meantime.
+- **No CI workflow.** The contracts, the dual `makemigrations --check` and the
+  blocking suites need one before any of this is a real gate.

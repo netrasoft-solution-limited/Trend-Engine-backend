@@ -10,12 +10,26 @@ Three states, and the distinction between the first two is the whole design:
     <Organization> bound to exactly one tenant
 
 Arch §5.2: "Unscoped access is an exception, not a silent full-table scan."
+
+On the plane check
+-----------------
+`bind_operator_all()` refuses on the tenant plane. That refusal is driven by
+`settings.TENANT_PLANE`, which is a property of the PROCESS — set once by
+`config.settings.portal` — not of the request.
+
+An earlier version marked the plane from middleware. That made the guarantee
+conditional on one middleware having run, so a Celery task, a management
+command run inside the portal container, or a request short-circuited by an
+earlier middleware all saw an unmarked context and could bind operator scope.
+The contextvar is kept as a second layer for tests, and it is now reset.
 """
 from __future__ import annotations
 
 import contextlib
 from contextvars import ContextVar
 from typing import Any, Iterator
+
+from django.conf import settings
 
 from .exceptions import TenantEscalationError
 
@@ -38,8 +52,16 @@ OPERATOR_ALL = _Sentinel("OPERATOR_ALL")
 
 _tenant: ContextVar[Any] = ContextVar("trend_engine_tenant", default=UNSET)
 
-#: Set once by portal middleware. While true, OPERATOR_ALL cannot be bound.
+#: Second layer, for tests and for defence in depth. The primary check is
+#: `settings.TENANT_PLANE`.
 _portal_plane: ContextVar[bool] = ContextVar("trend_engine_portal_plane", default=False)
+
+
+def is_portal_plane() -> bool:
+    """True when this process — or this context — is the tenant plane."""
+    if getattr(settings, "TENANT_PLANE", "operator") == "portal":
+        return True
+    return _portal_plane.get()
 
 
 def current_tenant() -> Any:
@@ -55,22 +77,33 @@ def bind_tenant(organization: Any) -> Any:
 def bind_operator_all() -> Any:
     """Bind the operator-wide scope.
 
-    Refuses on the portal plane. Arch §5.3 makes escalation structurally
+    Refuses on the tenant plane. Arch §5.3 makes escalation structurally
     impossible rather than merely disallowed, and this is where that promise is
-    kept in code: the portal's WSGI process marks itself, and this function has
-    no argument that can unmark it.
+    kept in code: the portal process declares its plane in settings, and this
+    function has no argument that can override it.
     """
-    if _portal_plane.get():
+    if is_portal_plane():
         raise TenantEscalationError(
             "The portal plane cannot bind OPERATOR_ALL. "
-            "If you are seeing this, a portal request reached operator code."
+            "If you are seeing this, a portal request or task reached operator code."
         )
     return _tenant.set(OPERATOR_ALL)
 
 
-def mark_portal_plane() -> None:
-    """Mark this context as portal-side. One-way for the life of the request."""
-    _portal_plane.set(True)
+@contextlib.contextmanager
+def portal_plane() -> Iterator[None]:
+    """Mark this context as portal-side for the duration of the block.
+
+    For tests and for any operator-process code that wants to prove it behaves
+    correctly under portal constraints. Resets on exit — an earlier version did
+    not, which leaked the flag across requests on a threaded worker and made
+    the test suite order-dependent.
+    """
+    token = _portal_plane.set(True)
+    try:
+        yield
+    finally:
+        _portal_plane.reset(token)
 
 
 def reset(token: Any) -> None:

@@ -8,3 +8,8 @@ class PortalConfig(AppConfig):
     name = "apps.portal"
     label = "portal"
     verbose_name = "L7 · Client portal"
+
+    def ready(self) -> None:
+        # Connects the publication-gate receivers. `apps.publication` cannot
+        # import this app (it sits below it), so the wiring happens here.
+        from . import receivers  # noqa: F401
