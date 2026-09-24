@@ -39,6 +39,27 @@ def send_invite_email(invite, *, raw_token: str) -> None:
     logger.info("Invite sent to %s for organisation %s", invite.email, invite.organization_id)
 
 
+def send_verification_email(membership, *, raw_token: str) -> None:
+    """The one place a raw verification token leaves the system."""
+    link = _portal_url(f"/portal/verify-email/{raw_token}")
+    send_mail(
+        subject=f"Confirm your email to activate {membership.organization.name}",
+        message=(
+            f"Thanks for registering {membership.organization.name}.\n\n"
+            f"Confirm this address to activate the organisation, then sign in:\n"
+            f"{link}\n\n"
+            f"This link works once and expires in 24 hours. If you did not "
+            f"register, ignore this message and nothing will be activated."
+        ),
+        from_email=None,
+        recipient_list=[membership.org_user.email],
+        fail_silently=False,
+    )
+    logger.info(
+        "Verification email sent for organisation %s", membership.organization_id
+    )
+
+
 def send_password_reset_email(user, *, uid: str, token: str) -> None:
     link = _portal_url(f"/portal/reset-password/{uid}/{token}")
     send_mail(

@@ -21,6 +21,10 @@ export POSTGRES_HOST=127.0.0.1
 export POSTGRES_PORT=5433
 
 export REDIS_URL="redis://127.0.0.1:6379/0"
+
+# Self-service organisation registration. Off by default in code and in
+# production (deploy/.env.example); on here so the smoke script can drive it.
+export PORTAL_ALLOW_SELF_SIGNUP=1
 export LOG_LEVEL=INFO
 
 # Cookies are Secure in base.py, which a plain-HTTP dev server cannot set.

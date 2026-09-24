@@ -95,6 +95,28 @@ class InviteAcceptSerializer(serializers.Serializer):
     password = _PasswordField()
 
 
+class RegisterSerializer(serializers.Serializer):
+    """Self-service registration of a new organisation.
+
+    There is no `role` field, deliberately: the registrant is always the
+    organisation's admin, and a role sent by the client is ignored rather than
+    validated.
+    """
+
+    organization_name = serializers.CharField(max_length=200)
+    name = serializers.CharField(max_length=200)
+    email = serializers.EmailField()
+    password = _PasswordField()
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=128)
+
+
+class ResendVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
 class InviteCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(choices=OrgRole.choices, default=OrgRole.VIEWER)
