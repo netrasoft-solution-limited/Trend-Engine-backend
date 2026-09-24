@@ -1,0 +1,132 @@
+# Deployment-blocking checks (README "Checks"; Arch §5.4).
+#
+# Each check is its own step and runs even if an earlier one failed, so one red
+# run shows every problem at once rather than only the first.
+#
+# The older suites under tests/ do not collect yet (stale imports and
+# NotImplementedError fixtures), so only the registration tests run for now.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Mirrors scripts/dev-env.sh, except that Postgres is the service container on
+# localhost:5432. None of these are secrets.
+env:
+  DJANGO_SECRET_KEY: ci-only-not-a-secret
+  DJANGO_DEBUG: "1"
+  DJANGO_INSECURE_COOKIES: "1"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  OPS_ALLOWED_HOSTS: ops.localhost,localhost,127.0.0.1
+  PORTAL_ALLOWED_HOSTS: localhost,127.0.0.1
+  PORTAL_TRUSTED_ORIGINS: http://localhost:5173,http://localhost:8000
+  OPS_TRUSTED_ORIGINS: http://ops.localhost:8001
+  POSTGRES_DB: trend_engine
+  POSTGRES_USER: trend_engine
+  POSTGRES_PASSWORD: dev
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: "5432"
+  REDIS_URL: redis://localhost:6379/0
+  LOG_LEVEL: INFO
+  PORTAL_ALLOW_SELF_SIGNUP: "1"
+  PORTAL_PUBLIC_URL: http://localhost:5173
+
+jobs:
+  checks:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: trend_engine
+          POSTGRES_USER: trend_engine
+          POSTGRES_PASSWORD: dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U trend_engine -d trend_engine"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        id: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The dual check is the important one: two settings modules declare
+      # different AUTH_USER_MODELs over one migration history. If BOTH report
+      # "No changes detected", the migration set is settings-independent.
+      - name: makemigrations --check (ops settings)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: makemigrations --check (portal settings)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python manage.py makemigrations --check --dry-run --settings=config.settings.portal
+
+      - name: lint-imports
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: lint-imports
+
+      - name: pytest (registration)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pytest apps/portal/tests/test_registration.py --ds=config.settings.portal -v
+
+  # Manual: Actions → ci → "Run workflow". Generates any migrations the models
+  # imply and uploads the NEW files only, for adding to the repo by hand.
+  generate-migrations:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # No database needed: makemigrations only warns when it cannot run its
+      # consistency check against one.
+      - name: makemigrations (ops settings)
+        run: python manage.py makemigrations -v 2
+
+      - name: Collect new migration files
+        run: |
+          mkdir -p generated
+          git ls-files --others --exclude-standard -- 'apps/*/migrations/*.py' > generated/FILES.txt
+          if [ -s generated/FILES.txt ]; then
+            while read -r f; do
+              mkdir -p "generated/$(dirname "$f")"
+              cp "$f" "generated/$f"
+            done < generated/FILES.txt
+            echo "New migration files:"; cat generated/FILES.txt
+          else
+            echo "No changes detected — the committed migrations already match the models." \
+              | tee generated/FILES.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-migrations
+          path: generated/

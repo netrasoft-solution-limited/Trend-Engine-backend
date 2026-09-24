@@ -127,6 +127,12 @@ class OrgMembership(models.Model):
         ACTIVE = "active", "Active"
         INVITED = "invited", "Invited"
         SUSPENDED = "suspended", "Suspended"
+        #: A self-registered admin who has not yet proved they own the email
+        #: address. Excluded from `active_memberships()`, which is what stops
+        #: them logging in — the organisation is ONBOARDING, and ONBOARDING
+        #: organisations ARE allowed to log in, so the org status is not the
+        #: guard here. This is.
+        PENDING_VERIFICATION = "pending_verification", "Pending email verification"
 
     org_user = models.ForeignKey(
         "portal.OrgUser", on_delete=models.CASCADE, related_name="memberships"
@@ -177,7 +183,12 @@ def _invite_expiry():
 
 
 class OrgInvite(models.Model):
-    """A single-use invitation. PRD §6.8: there is no self-serve signup path.
+    """A single-use invitation into an EXISTING organisation.
+
+    PRD §6.8 made this the only way in. Self-service registration of a NEW
+    organisation now exists behind `PORTAL_ALLOW_SELF_SIGNUP` (a recorded
+    deviation — see README.md); joining someone else's organisation is still
+    invite-only.
 
     The raw token is shown once, in the email, and never stored — only its
     hash. A leaked database therefore does not yield usable invitations.
@@ -217,6 +228,49 @@ class OrgInvite(models.Model):
         )
 
 
+def _verification_expiry():
+    return timezone.now() + timedelta(hours=24)
+
+
+class EmailVerificationToken(models.Model):
+    """Proof that a self-registered admin owns their email address.
+
+    Same handling as `OrgInvite`: the raw token appears once, in the email, and
+    only its keyed hash is stored. Single-use (`used_at`), time-limited (24h),
+    and superseded by a resend (`invalidated_at`) so that only the newest link
+    in someone's inbox works.
+
+    Plain manager, like the other identity models: it is read by anonymous
+    requests, before any tenant could be bound.
+    """
+
+    membership = models.ForeignKey(
+        "portal.OrgMembership", on_delete=models.CASCADE, related_name="verification_tokens"
+    )
+    token_hash = models.CharField(max_length=128, unique=True)
+    expires_at = models.DateTimeField(default=_verification_expiry)
+    used_at = models.DateTimeField(null=True, blank=True)
+    invalidated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    @staticmethod
+    def new_token() -> str:
+        return secrets.token_urlsafe(32)
+
+    @property
+    def is_usable(self) -> bool:
+        return (
+            self.used_at is None
+            and self.invalidated_at is None
+            and self.expires_at > timezone.now()
+        )
+
+
 class PortalLoginEvent(models.Model):
     """PRD §6.8 requires an audit trail of portal logins; §7.6 sets retention
     at 730 days.
@@ -235,6 +289,11 @@ class PortalLoginEvent(models.Model):
         INACTIVE = "inactive", "Account inactive"
         NO_MEMBERSHIP = "no_membership", "No active membership"
         RATE_LIMITED = "rate_limited", "Rate limited"
+        # Self-service registration. Recorded here rather than as an
+        # AuditEvent because the portal may not import apps.operations.
+        REGISTERED = "registered", "Registered (unverified)"
+        VERIFIED = "verified", "Email verified"
+        VERIFY_FAILED = "verify_failed", "Verification failed"
 
     at = models.DateTimeField(auto_now_add=True, db_index=True)
     org_user = models.ForeignKey(

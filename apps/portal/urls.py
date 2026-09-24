@@ -26,6 +26,14 @@ urlpatterns = [
         views.PasswordResetConfirmView.as_view(),
         name="portal-password-reset-confirm",
     ),
+    # Self-service registration — 404 unless PORTAL_ALLOW_SELF_SIGNUP.
+    path("api/auth/register", views.RegisterView.as_view(), name="portal-register"),
+    path("api/auth/verify", views.VerifyEmailView.as_view(), name="portal-verify-email"),
+    path(
+        "api/auth/verify/resend",
+        views.ResendVerificationView.as_view(),
+        name="portal-verify-resend",
+    ),
     path("api/invites/accept", views.InviteAcceptView.as_view(), name="portal-invite-accept"),
 
     # ── Team (Org Admin only, enforced in the view) ─────────────────────────

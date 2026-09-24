@@ -66,10 +66,25 @@ MIDDLEWARE = COMMON_MIDDLEWARE + [
     "django.contrib.auth.middleware.LoginRequiredMiddleware",
 ]
 
-# PRD §6.8: invite-based provisioning only. This flag exists so that adding a
-# signup view is a deliberate settings change someone has to justify in review,
-# rather than a URL someone can quietly append.
-PORTAL_ALLOW_SELF_SIGNUP = False
+# PRD §6.8 said invite-based provisioning only. Self-service registration of a
+# NEW organisation now exists, as a recorded deviation (README.md): the
+# organisation becomes active as soon as its admin verifies their email, with
+# no operator approval. Off unless the environment turns it on — when off, the
+# register endpoint answers 404. Joining an EXISTING organisation stays
+# invite-only either way.
+PORTAL_ALLOW_SELF_SIGNUP = env("PORTAL_ALLOW_SELF_SIGNUP", "0") == "1"
+
+#: Registration attempts per email and per client IP, per window. Every attempt
+#: counts, not only failures — a successful registration is the expensive path
+#: (an org, a user, an email), so it is the one worth throttling.
+PORTAL_SIGNUP_MAX_PER_EMAIL = 5
+PORTAL_SIGNUP_MAX_PER_IP = 20
+PORTAL_SIGNUP_WINDOW_SECONDS = 60 * 60
+
+#: Verification-email resends. Lower: each one sends mail to an address the
+#: caller may not own.
+PORTAL_VERIFY_RESEND_MAX_PER_EMAIL = 3
+PORTAL_VERIFY_RESEND_MAX_PER_IP = 20
 
 # PRD §7.6: portal users are identifiable individuals, so GDPR/CCPA applies to
 # this plane independently of the evidence layer's rights framework.

@@ -1,4 +1,4 @@
-"""Invite token handling.
+"""Invite and email-verification token handling.
 
 The raw token is the credential. It is shown exactly once — in the email — and
 never stored. Only a hash goes in the database, so a dump of `portal_orginvite`
@@ -16,7 +16,7 @@ import hmac
 from django.conf import settings
 
 
-def hash_invite_token(raw: str) -> str:
+def hash_token(raw: str) -> str:
     """Keyed with SECRET_KEY so a stolen database cannot be used to build a
     rainbow table of plausible tokens offline."""
     return hmac.new(
@@ -24,5 +24,9 @@ def hash_invite_token(raw: str) -> str:
     ).hexdigest()
 
 
+#: The original name, kept for the invite flow's call sites.
+hash_invite_token = hash_token
+
+
 def tokens_match(raw: str, stored_hash: str) -> bool:
-    return hmac.compare_digest(hash_invite_token(raw), stored_hash)
+    return hmac.compare_digest(hash_token(raw), stored_hash)
