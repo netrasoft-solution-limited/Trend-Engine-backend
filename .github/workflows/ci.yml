@@ -4,7 +4,7 @@
 # run shows every problem at once rather than only the first.
 #
 # The older suites under tests/ do not collect yet (stale imports and
-# NotImplementedError fixtures), so only the registration tests run for now.
+# NotImplementedError fixtures), so only the portal tests listed below run.
 
 name: ci
 
@@ -84,9 +84,12 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: lint-imports
 
-      - name: pytest (registration)
+      - name: pytest (portal)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: pytest apps/portal/tests/test_registration.py --ds=config.settings.portal -v
+        run: >-
+          pytest apps/portal/tests/test_registration.py
+          apps/portal/tests/test_deploy_settings.py
+          --ds=config.settings.portal -v
 
   # Manual: Actions → ci → "Run workflow". Generates any migrations the models
   # imply and uploads the NEW files only, for adding to the repo by hand.
