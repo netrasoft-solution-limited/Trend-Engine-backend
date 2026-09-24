@@ -204,7 +204,7 @@ perfectly. Arch §11.3 makes this an acceptance criterion, not a nicety.
 .venv/bin/python manage.py makemigrations --check --dry-run                                  # ops
 .venv/bin/python manage.py makemigrations --check --dry-run --settings=config.settings.portal
 lint-imports                          # the five dependency contracts
-pytest apps/portal/tests/test_registration.py --ds=config.settings.portal
+pytest apps/portal/tests/test_registration.py apps/portal/tests/test_deploy_settings.py --ds=config.settings.portal
 SERVER_LOG=<runserver log> scripts/smoke-portal-api.sh   # checks over real HTTP
 ```
 
@@ -251,6 +251,6 @@ provably settings-independent. Treat it as deployment-blocking, like
   suites read as specifications and do not yet assert. `scripts/smoke-portal-api.sh`
   covers the same ground over HTTP in the meantime.
 - **CI covers only part of the blocking set.** `.github/workflows/ci.yml` runs
-  the contracts, the dual `makemigrations --check` and the registration tests.
+  the contracts, the dual `makemigrations --check` and the portal tests (registration, deployment settings).
   The tenancy and publication suites under `tests/` do not collect yet, so they
   are not run.

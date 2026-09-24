@@ -13,3 +13,6 @@ class PortalConfig(AppConfig):
         # Connects the publication-gate receivers. `apps.publication` cannot
         # import this app (it sits below it), so the wiring happens here.
         from . import receivers  # noqa: F401
+        from .notifications import warn_if_emails_go_to_the_log
+
+        warn_if_emails_go_to_the_log()

@@ -15,6 +15,29 @@ from django.core.mail import send_mail
 logger = logging.getLogger(__name__)
 
 
+def warn_if_emails_go_to_the_log() -> bool:
+    """Warn, once per process start, when a non-DEBUG process has no real
+    email backend. Called from `PortalConfig.ready()`.
+
+    Deliberately a warning, not a startup failure. The console backend is the
+    default everywhere, and in production it means every email — invitation,
+    password-reset and verification links included, raw tokens and all — is
+    written to the process log instead of being sent. Anyone with log access
+    could use those links. Returns True when it warned.
+    """
+    from config.settings.mail import CONSOLE_EMAIL_BACKEND
+
+    if settings.DEBUG or settings.EMAIL_BACKEND != CONSOLE_EMAIL_BACKEND:
+        return False
+    logger.warning(
+        "DEBUG is off and EMAIL_BACKEND is the console backend: no email will be "
+        "sent. Invitation, password-reset and verification emails, including "
+        "their one-time links, are being written to this log instead. Set "
+        "DJANGO_EMAIL_BACKEND and the EMAIL_* variables to send real mail."
+    )
+    return True
+
+
 def _portal_url(path: str) -> str:
     base = getattr(settings, "PORTAL_PUBLIC_URL", "http://localhost:5173")
     return f"{base.rstrip('/')}{path}"

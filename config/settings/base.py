@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .mail import email_settings as _email_settings
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
@@ -104,6 +106,11 @@ DATABASES = {
         "HOST": env("POSTGRES_HOST", "postgres"),
         "PORT": env("POSTGRES_PORT", "5432"),
         "CONN_MAX_AGE": 60,
+        # Check a reused connection before handing it to a request. A managed
+        # Postgres that suspends when idle (Neon) closes connections this
+        # process still holds; without the check, the first request after a
+        # suspend fails with "server closed the connection unexpectedly".
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -206,13 +213,24 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "config.api.exception_handler",
 }
 
-# PRD §13 leaves the transactional email provider undecided. Until it is
-# chosen, invites and password resets print to the console in development
-# and fail loudly in production rather than silently dropping.
-EMAIL_BACKEND = env(
-    "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Trend Engine <no-reply@localhost>")
+# ── Email ───────────────────────────────────────────────────────────────────
+# PRD §13 leaves the transactional email provider undecided; any SMTP provider
+# is configured from the environment (parsed in config/settings/mail.py).
+#
+# Unset, the backend is the CONSOLE backend in every environment, production
+# included. Nothing fails: every message is written to the process log instead
+# of being sent, and that includes the one-time links in invitations, password
+# resets and verification emails. `PortalConfig.ready()` logs a warning at
+# startup when this happens with DEBUG off. Set DJANGO_EMAIL_BACKEND and the
+# EMAIL_* variables before relying on email anywhere real.
+_email = _email_settings(os.environ)
+EMAIL_BACKEND = _email["EMAIL_BACKEND"]
+EMAIL_HOST = _email["EMAIL_HOST"]
+EMAIL_PORT = _email["EMAIL_PORT"]
+EMAIL_HOST_USER = _email["EMAIL_HOST_USER"]
+EMAIL_HOST_PASSWORD = _email["EMAIL_HOST_PASSWORD"]
+EMAIL_USE_TLS = _email["EMAIL_USE_TLS"]
+DEFAULT_FROM_EMAIL = _email["DEFAULT_FROM_EMAIL"]
 PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:5173")
 
 LANGUAGE_CODE = "en-us"
