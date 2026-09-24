@@ -27,6 +27,7 @@ from apps.tenancy.models import Organization
 
 pytestmark = pytest.mark.django_db
 
+CSRF = "/portal/api/auth/csrf"
 REGISTER = "/portal/api/auth/register"
 VERIFY = "/portal/api/auth/verify"
 RESEND = "/portal/api/auth/verify/resend"
@@ -138,6 +139,44 @@ def test_slugs_stay_unique_for_the_same_name(post):
         "acme-botanicals",
         "acme-botanicals-2",
     ]
+
+
+def _email_of_length(n: int) -> str:
+    """A syntactically valid address exactly `n` characters long (n >= 72).
+
+    EmailValidator caps each domain label at 63 characters, so the length is
+    spread over 60-character labels rather than one long one.
+    """
+    local = "a" * 64
+    tail = ".example"
+    middle_len = n - len(local) - 1 - len(tail)  # the 1 is the "@"
+    labels = []
+    while middle_len > 0:
+        size = min(60, middle_len)
+        labels.append("b" * size)
+        middle_len -= size + 1  # +1 for the dot that follows each label
+    address = f"{local}@{'.'.join(labels)}{tail}"
+    assert len(address) == n, (len(address), n)
+    return address
+
+
+def test_email_over_254_characters_is_a_400_not_a_500(post):
+    """OrgUser.email is varchar(254); EmailValidator alone admits up to 320."""
+    response = register(post, email=_email_of_length(255))
+
+    assert response.status_code == 400
+    assert response.json() == {"email": ["Ensure this field has no more than 254 characters."]}
+    assert not OrgUser.objects.exists()
+    assert not Organization.objects.exists()
+
+
+def test_email_of_exactly_254_characters_registers(post):
+    address = _email_of_length(254)
+
+    response = register(post, email=address)
+
+    assert response.status_code == 202
+    assert OrgUser.objects.filter(email=address).exists()
 
 
 def test_weak_password_is_refused_before_anything_is_created(post):
@@ -289,6 +328,19 @@ def test_resend_is_rate_limited(post, registered, settings):
 
 
 # ── the flag ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_csrf_endpoint_reports_whether_self_signup_is_enabled(api, settings, enabled):
+    settings.PORTAL_ALLOW_SELF_SIGNUP = enabled
+
+    response = api.get(CSRF)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"csrfToken", "selfSignupEnabled"}
+    assert body["selfSignupEnabled"] is enabled
+    assert isinstance(body["csrfToken"], str) and body["csrfToken"]
 
 
 def test_register_is_404_when_self_signup_is_off(post, settings):

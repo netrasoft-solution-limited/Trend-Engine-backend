@@ -25,6 +25,10 @@ export REDIS_URL="redis://127.0.0.1:6379/0"
 # Self-service organisation registration. Off by default in code and in
 # production (deploy/.env.example); on here so the smoke script can drive it.
 export PORTAL_ALLOW_SELF_SIGNUP=1
+
+# Where emailed links point: invitations, password resets and email
+# verification are all built from this. The Vite dev server for ../frontend.
+export PORTAL_PUBLIC_URL="http://localhost:5173"
 export LOG_LEVEL=INFO
 
 # Cookies are Secure in base.py, which a plain-HTTP dev server cannot set.

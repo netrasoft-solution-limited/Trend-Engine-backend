@@ -102,12 +102,20 @@ class CsrfView(APIView):
 
     Safe to expose: the token is only useful to a caller that also holds the
     session cookie, which an attacker's origin cannot read or send.
+
+    `selfSignupEnabled` rides along because the client already calls this on
+    boot, and it needs to know whether to offer the register page at all.
     """
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response({"csrfToken": get_token(request)})
+        return Response(
+            {
+                "csrfToken": get_token(request),
+                "selfSignupEnabled": bool(settings.PORTAL_ALLOW_SELF_SIGNUP),
+            }
+        )
 
 
 @api_public
