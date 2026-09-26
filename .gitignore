@@ -12,3 +12,5 @@ htmlcov/
 # Secrets — PRD §7.1: outside source control, separate prod/dev credentials.
 deploy/.env
 *.pem
+# curl cookie jars hold live session cookies.
+cookies.txt
