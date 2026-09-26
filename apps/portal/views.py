@@ -50,6 +50,10 @@ from .models import (
 from .notifications import send_invite_email, send_password_reset_email, send_verification_email
 from .tokens import hash_invite_token, hash_token
 
+import logging  # TEMP-DIAG
+
+_diag = logging.getLogger("apps.portal.diag")  # TEMP-DIAG: remove after diagnosis
+
 
 class IsOrgAdmin(BasePermission):
     """Server-side role check, read from the membership the middleware bound.
@@ -450,6 +454,7 @@ class RegisterView(APIView):
             return Response(_RATE_LIMITED, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         if OrgUser.objects.filter(email=email).exists():
+            _diag.warning("TEMP-DIAG register: already-registered branch")
             # Create nothing, reveal nothing. The hash is the expensive part of
             # the real path; doing it here keeps the two paths' latency close.
             make_password(data["password"])
@@ -472,11 +477,21 @@ class RegisterView(APIView):
                 _record_login(
                     request, email=email, outcome=PortalLoginEvent.Outcome.REGISTERED, user=user
                 )
+                _diag.warning("TEMP-DIAG register: before on_commit, membership=%s", membership.pk)
                 _send_after_commit(membership, raw)
-        except IntegrityError:
+                _diag.warning("TEMP-DIAG register: after on_commit, membership=%s", membership.pk)
+        except IntegrityError as exc:
+            # TEMP-DIAG: class and constraint only, never the message (it can
+            # contain the email address).
+            _diag.warning(
+                "TEMP-DIAG register: IntegrityError %s constraint=%s",
+                type(getattr(exc, "__cause__", None) or exc).__name__,
+                getattr(getattr(exc.__cause__, "diag", None), "constraint_name", None),
+            )
             # A concurrent registration took this email between the check and
             # the insert. Same answer as any other already-registered address.
             pass
+        _diag.warning("TEMP-DIAG register: returning 202")
 
         return Response(_REGISTER_ACCEPTED, status=status.HTTP_202_ACCEPTED)
 
