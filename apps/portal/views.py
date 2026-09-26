@@ -55,6 +55,35 @@ import logging  # TEMP-DIAG
 _diag = logging.getLogger("apps.portal.diag")  # TEMP-DIAG: remove after diagnosis
 
 
+def _diag_mem() -> str:
+    """TEMP-DIAG: container memory as the kernel sees it, without Render Shell.
+
+    cgroup v2 paths first, v1 as a fallback; "?" where neither exists.
+    """
+
+    def first(*paths: str) -> str:
+        for path in paths:
+            try:
+                with open(path) as f:
+                    return f.read().strip()
+            except OSError:
+                continue
+        return "?"
+
+    events = first("/sys/fs/cgroup/memory.events")
+    oom_kills = next(
+        (line.split()[1] for line in events.splitlines() if line.startswith("oom_kill ")), "?"
+    )
+    rss = next(
+        (line.split(":")[1].strip() for line in first("/proc/self/status").splitlines()
+         if line.startswith("VmRSS:")),
+        "?",
+    )
+    current = first("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    limit = first("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    return f"cgroup_current={current} cgroup_max={limit} oom_kills={oom_kills} worker_rss={rss}"
+
+
 class IsOrgAdmin(BasePermission):
     """Server-side role check, read from the membership the middleware bound.
 
@@ -436,6 +465,7 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        _diag.warning("TEMP-DIAG register: entered post() %s", _diag_mem())
         if not settings.PORTAL_ALLOW_SELF_SIGNUP:
             raise Http404
 
@@ -463,9 +493,11 @@ class RegisterView(APIView):
         try:
             with transaction.atomic():
                 organization = _create_onboarding_organization(data["organization_name"])
+                _diag.warning("TEMP-DIAG register: before create_user (hash) %s", _diag_mem())
                 user = OrgUser.objects.create_user(
                     email=email, password=data["password"], name=data["name"]
                 )
+                _diag.warning("TEMP-DIAG register: after create_user (hash) %s", _diag_mem())
                 membership = OrgMembership.objects.create(
                     org_user=user,
                     organization=organization,

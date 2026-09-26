@@ -179,8 +179,10 @@ CSRF_USE_SESSIONS = True
 
 # Argon2 first. This is a credentialed multi-tenant SaaS holding a client's
 # commercial intelligence; the default PBKDF2 is not the right trade here.
+# Argon2 at OWASP's minimum memory rather than Django's 100 MiB, which
+# out-of-memory-kills a worker on the current instance — see config/hashers.py.
 PASSWORD_HASHERS = [
-    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "config.hashers.LowMemoryArgon2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
     "django.contrib.auth.hashers.ScryptPasswordHasher",
