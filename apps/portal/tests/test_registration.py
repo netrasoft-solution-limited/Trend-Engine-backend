@@ -1,4 +1,4 @@
-"""Self-service organisation registration — register, verify, resend.
+"""Self-service organisation registration — register, and be signed in.
 
 Runs under the PORTAL settings, and refuses to run under any other:
 
@@ -9,11 +9,7 @@ request here would 404 — and the flag-off test would pass for the wrong reason
 """
 from __future__ import annotations
 
-import re
-from datetime import timedelta
-
 import pytest
-from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.portal.models import (
@@ -29,9 +25,8 @@ pytestmark = pytest.mark.django_db
 
 CSRF = "/portal/api/auth/csrf"
 REGISTER = "/portal/api/auth/register"
-VERIFY = "/portal/api/auth/verify"
-RESEND = "/portal/api/auth/verify/resend"
 LOGIN = "/portal/api/auth/login"
+LOGOUT = "/portal/api/auth/logout"
 SESSION = "/portal/api/auth/session"
 
 EMAIL = "ada@acme.example"
@@ -65,7 +60,7 @@ def api():
 
 @pytest.fixture
 def post(api, django_capture_on_commit_callbacks):
-    """POST as JSON, running on-commit callbacks so emails actually send."""
+    """POST as JSON, running on-commit callbacks so any email actually sends."""
 
     def _post(path, payload, client=None):
         with django_capture_on_commit_callbacks(execute=True):
@@ -74,7 +69,7 @@ def post(api, django_capture_on_commit_callbacks):
     return _post
 
 
-def register(post, **overrides):
+def register(post, client=None, **overrides):
     payload = {
         "organization_name": "Acme Botanicals",
         "name": "Ada Admin",
@@ -82,49 +77,60 @@ def register(post, **overrides):
         "password": PASSWORD,
         **overrides,
     }
-    return post(REGISTER, payload)
-
-
-def token_in(message) -> str:
-    match = re.search(r"/portal/verify-email/([A-Za-z0-9_-]+)", message.body)
-    assert match, f"no verification link in: {message.body!r}"
-    return match.group(1)
-
-
-@pytest.fixture
-def registered(post, mailoutbox):
-    """A registration, and the raw token from its email."""
-    response = register(post)
-    assert response.status_code == 202
-    assert len(mailoutbox) == 1
-    return token_in(mailoutbox[0])
+    return post(REGISTER, payload, client=client)
 
 
 # ── register ────────────────────────────────────────────────────────────────
 
 
-def test_register_creates_an_onboarding_org_with_a_pending_admin(post, mailoutbox):
+def test_register_creates_an_active_org_with_an_active_admin(post, mailoutbox):
     response = register(post)
 
-    assert response.status_code == 202
+    assert response.status_code == 201
     org = Organization.objects.get(name="Acme Botanicals")
-    assert org.status == Organization.Status.ONBOARDING
+    assert org.status == Organization.Status.ACTIVE
     assert org.slug == "acme-botanicals"
 
     membership = OrgMembership.objects.get(organization=org)
     assert membership.org_user.email == EMAIL
     assert membership.role == OrgRole.ADMIN
-    assert membership.status == OrgMembership.Status.PENDING_VERIFICATION
+    assert membership.status == OrgMembership.Status.ACTIVE
+    assert membership.accepted_at is not None
 
-    assert [m.to for m in mailoutbox] == [[EMAIL]]
-    raw = token_in(mailoutbox[0])
-    stored = EmailVerificationToken.objects.get(membership=membership)
-    assert stored.token_hash != raw, "the raw token must never be stored"
-    assert stored.expires_at - timezone.now() <= timedelta(hours=24)
+    # No verification step: nothing to email, no token to store.
+    assert mailoutbox == []
+    assert not EmailVerificationToken.objects.exists()
 
     assert PortalLoginEvent.objects.filter(
         email_attempted=EMAIL, outcome=PortalLoginEvent.Outcome.REGISTERED
     ).exists()
+
+
+def test_register_signs_the_admin_in(api, post):
+    response = register(post)
+
+    body = response.json()
+    assert body["email"] == EMAIL
+    assert body["role"] == OrgRole.ADMIN
+    assert body["organization"]["name"] == "Acme Botanicals"
+
+    session = api.get(SESSION)
+    assert session.status_code == 200
+    assert session.json()["email"] == EMAIL
+    assert PortalLoginEvent.objects.filter(
+        email_attempted=EMAIL, outcome=PortalLoginEvent.Outcome.SUCCESS
+    ).exists()
+
+
+def test_a_registered_admin_can_log_out_and_back_in(api, post):
+    register(post)
+    assert post(LOGOUT, {}).status_code == 204
+    assert api.get(SESSION).status_code == 401
+
+    login = post(LOGIN, {"email": EMAIL, "password": PASSWORD})
+
+    assert login.status_code == 200
+    assert login.json()["role"] == OrgRole.ADMIN
 
 
 def test_role_is_always_admin_whatever_the_request_says(post):
@@ -134,7 +140,7 @@ def test_role_is_always_admin_whatever_the_request_says(post):
 
 def test_slugs_stay_unique_for_the_same_name(post):
     register(post)
-    register(post, email="bob@other.example")
+    register(post, client=APIClient(), email="bob@other.example")
     assert sorted(Organization.objects.values_list("slug", flat=True)) == [
         "acme-botanicals",
         "acme-botanicals-2",
@@ -175,7 +181,7 @@ def test_email_of_exactly_254_characters_registers(post):
 
     response = register(post, email=address)
 
-    assert response.status_code == 202
+    assert response.status_code == 201
     assert OrgUser.objects.filter(email=address).exists()
 
 
@@ -186,114 +192,51 @@ def test_weak_password_is_refused_before_anything_is_created(post):
     assert not Organization.objects.exists()
 
 
-# ── the account-enumeration oracle ──────────────────────────────────────────
+# ── an address that already has an account ──────────────────────────────────
 
 
-def test_duplicate_email_gets_the_identical_response_and_creates_nothing(post, mailoutbox):
-    fresh = register(post)
-    orgs, users, mails = Organization.objects.count(), OrgUser.objects.count(), len(mailoutbox)
+def test_duplicate_email_is_refused_and_creates_nothing(post):
+    register(post)
+    orgs, users = Organization.objects.count(), OrgUser.objects.count()
 
     duplicate = register(
-        post, organization_name="Someone Else Ltd", email=EMAIL.upper(), password="another-pass-4567"
+        post,
+        client=APIClient(),
+        organization_name="Someone Else Ltd",
+        email=EMAIL.upper(),
+        password="another-pass-4567",
     )
 
-    assert duplicate.status_code == fresh.status_code
-    assert duplicate.json() == fresh.json()
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "email_taken"
     assert Organization.objects.count() == orgs
     assert OrgUser.objects.count() == users
-    assert len(mailoutbox) == mails
 
 
-def test_existing_invited_account_gets_the_identical_response(post, mailoutbox):
+def test_duplicate_email_does_not_sign_anyone_in(post):
+    register(post)
+    other = APIClient()
+
+    register(post, client=other, organization_name="Someone Else Ltd")
+
+    assert other.get(SESSION).status_code == 401
+
+
+def test_existing_invited_account_cannot_be_taken_over(post):
     OrgUser.objects.create_user(email="invitee@acme.example", password=None, name="Invitee")
-    fresh = register(post)
 
-    existing = register(post, email="invitee@acme.example", organization_name="Takeover Inc")
+    response = register(post, email="invitee@acme.example", organization_name="Takeover Inc")
 
-    assert (existing.status_code, existing.json()) == (fresh.status_code, fresh.json())
+    assert response.status_code == 409
     assert not Organization.objects.filter(name="Takeover Inc").exists()
-    assert len(mailoutbox) == 1
 
 
-# ── login before and after verification ─────────────────────────────────────
+# ── the verification endpoints are gone ─────────────────────────────────────
 
 
-def test_unverified_user_cannot_log_in(api, post, registered):
-    response = post(LOGIN, {"email": EMAIL, "password": PASSWORD})
-
-    assert response.status_code == 403
-    assert response.json()["code"] == "email_not_verified"
-    assert "_auth_user_id" not in api.session
-    assert api.get(SESSION).status_code == 401
-
-
-def test_verify_activates_the_org_and_membership_without_logging_in(api, post, registered):
-    response = post(VERIFY, {"token": registered})
-
-    assert response.status_code == 200
-    membership = OrgMembership.objects.select_related("organization").get(org_user__email=EMAIL)
-    assert membership.status == OrgMembership.Status.ACTIVE
-    assert membership.accepted_at is not None
-    assert membership.organization.status == Organization.Status.ACTIVE
-    assert EmailVerificationToken.objects.get(membership=membership).used_at is not None
-    assert PortalLoginEvent.objects.filter(outcome=PortalLoginEvent.Outcome.VERIFIED).exists()
-
-    # Verification is not a login.
-    assert api.get(SESSION).status_code == 401
-
-    login = post(LOGIN, {"email": EMAIL, "password": PASSWORD})
-    assert login.status_code == 200
-    assert login.json()["role"] == OrgRole.ADMIN
-
-
-def test_a_used_token_cannot_be_reused(post, registered):
-    assert post(VERIFY, {"token": registered}).status_code == 200
-
-    again = post(VERIFY, {"token": registered})
-
-    assert again.status_code == 400
-    assert again.json()["code"] == "invalid_token"
-    assert PortalLoginEvent.objects.filter(outcome=PortalLoginEvent.Outcome.VERIFY_FAILED).exists()
-
-
-def test_an_expired_token_fails_and_activates_nothing(post, registered):
-    EmailVerificationToken.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
-
-    response = post(VERIFY, {"token": registered})
-
-    assert response.status_code == 400
-    membership = OrgMembership.objects.select_related("organization").get(org_user__email=EMAIL)
-    assert membership.status == OrgMembership.Status.PENDING_VERIFICATION
-    assert membership.organization.status == Organization.Status.ONBOARDING
-
-
-def test_an_unknown_token_fails(post):
-    response = post(VERIFY, {"token": "not-a-real-token"})
-    assert response.status_code == 400
-    assert response.json()["code"] == "invalid_token"
-
-
-# ── resend ──────────────────────────────────────────────────────────────────
-
-
-def test_resend_invalidates_the_earlier_link(post, registered, mailoutbox):
-    response = post(RESEND, {"email": EMAIL})
-
-    assert response.status_code == 202
-    assert len(mailoutbox) == 2
-    fresh = token_in(mailoutbox[1])
-    assert fresh != registered
-
-    assert post(VERIFY, {"token": registered}).status_code == 400
-    assert post(VERIFY, {"token": fresh}).status_code == 200
-
-
-def test_resend_answers_identically_for_an_unknown_address(post, registered, mailoutbox):
-    known = post(RESEND, {"email": EMAIL})
-    unknown = post(RESEND, {"email": "nobody@nowhere.example"})
-
-    assert (unknown.status_code, unknown.json()) == (known.status_code, known.json())
-    assert len(mailoutbox) == 2  # the registration email + one resend, nothing for "nobody"
+@pytest.mark.parametrize("path", ["/portal/api/auth/verify", "/portal/api/auth/verify/resend"])
+def test_verification_endpoints_no_longer_exist(post, path):
+    assert post(path, {"token": "anything", "email": EMAIL}).status_code == 404
 
 
 # ── rate limits ─────────────────────────────────────────────────────────────
@@ -313,18 +256,12 @@ def test_register_is_rate_limited_per_email(post, settings):
 def test_register_is_rate_limited_per_ip(post, settings):
     settings.PORTAL_SIGNUP_MAX_PER_IP = 2
     register(post, email="one@acme.example")
-    register(post, email="two@acme.example")
+    register(post, client=APIClient(), email="two@acme.example")
 
-    response = register(post, email="three@acme.example")
+    response = register(post, client=APIClient(), email="three@acme.example")
 
     assert response.status_code == 429
     assert not OrgUser.objects.filter(email="three@acme.example").exists()
-
-
-def test_resend_is_rate_limited(post, registered, settings):
-    settings.PORTAL_VERIFY_RESEND_MAX_PER_EMAIL = 1
-    assert post(RESEND, {"email": EMAIL}).status_code == 202
-    assert post(RESEND, {"email": EMAIL}).status_code == 429
 
 
 # ── the flag ────────────────────────────────────────────────────────────────

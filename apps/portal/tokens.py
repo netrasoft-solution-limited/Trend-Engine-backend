@@ -1,4 +1,4 @@
-"""Invite and email-verification token handling.
+"""Invite token handling.
 
 The raw token is the credential. It is shown exactly once — in the email — and
 never stored. Only a hash goes in the database, so a dump of `portal_orginvite`

@@ -127,11 +127,10 @@ class OrgMembership(models.Model):
         ACTIVE = "active", "Active"
         INVITED = "invited", "Invited"
         SUSPENDED = "suspended", "Suspended"
-        #: A self-registered admin who has not yet proved they own the email
-        #: address. Excluded from `active_memberships()`, which is what stops
-        #: them logging in — the organisation is ONBOARDING, and ONBOARDING
-        #: organisations ARE allowed to log in, so the org status is not the
-        #: guard here. This is.
+        #: LEGACY. Self-registered admins used to wait here until they
+        #: verified their email. Registration no longer requires that, nothing
+        #: assigns this status any more, and migration 0003 activated every
+        #: membership that held it. Kept so the column's choices do not change.
         PENDING_VERIFICATION = "pending_verification", "Pending email verification"
 
     org_user = models.ForeignKey(
@@ -233,9 +232,11 @@ def _verification_expiry():
 
 
 class EmailVerificationToken(models.Model):
-    """Proof that a self-registered admin owns their email address.
+    """LEGACY — registration no longer verifies email, and nothing creates or
+    reads these rows any more. The table is kept for its history; dropping it
+    is a separate schema migration.
 
-    Same handling as `OrgInvite`: the raw token appears once, in the email, and
+    Proof that a self-registered admin owns their email address. Same handling as `OrgInvite`: the raw token appears once, in the email, and
     only its keyed hash is stored. Single-use (`used_at`), time-limited (24h),
     and superseded by a resend (`invalidated_at`) so that only the newest link
     in someone's inbox works.
