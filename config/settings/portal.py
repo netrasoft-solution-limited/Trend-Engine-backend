@@ -69,9 +69,9 @@ MIDDLEWARE = COMMON_MIDDLEWARE + [
 # PRD §6.8 said invite-based provisioning only. Self-service registration of a
 # NEW organisation now exists, as a recorded deviation (README.md): the
 # organisation is active and its admin logged in as soon as they register, with
-# no email verification and no operator approval. Off unless the environment turns it on — when off, the
-# register endpoint answers 404. Joining an EXISTING organisation stays
-# invite-only either way.
+# no email verification and no operator approval. Off unless the environment
+# turns it on — when off, the register endpoint answers 404. Joining an
+# EXISTING organisation stays invite-only either way.
 PORTAL_ALLOW_SELF_SIGNUP = env("PORTAL_ALLOW_SELF_SIGNUP", "0") == "1"
 
 #: Registration attempts per email and per client IP, per window. Every attempt

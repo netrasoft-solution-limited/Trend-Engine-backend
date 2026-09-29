@@ -26,6 +26,10 @@ export REDIS_URL="redis://127.0.0.1:6379/0"
 # production (deploy/.env.example); on here so the smoke script can drive it.
 export PORTAL_ALLOW_SELF_SIGNUP=1
 
+# Ops login without a second factor, which is not built yet. Honoured only with
+# DJANGO_DEBUG=1; production refuses ops login outright (config/settings/ops.py).
+export OPS_PASSWORD_ONLY_LOGIN=1
+
 # Where emailed links point: invitations, password resets and email
 # verification are all built from this. The Vite dev server for ../frontend.
 export PORTAL_PUBLIC_URL="http://localhost:5173"
