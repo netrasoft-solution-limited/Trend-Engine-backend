@@ -104,22 +104,25 @@ stronger boundary anyway. Recorded as Arch §15.1 A2.
 
 **Self-service organisation registration overrules PRD §6.8's invite-only
 rule — deliberately.** A new organisation can register itself at
-`POST /portal/api/auth/register`, and it becomes `ACTIVE` as soon as its admin
-verifies their email. **No operator approval is involved.** The first admin's
-membership is `PENDING_VERIFICATION` until then, and that membership status is
-what blocks login. The organisation's `ONBOARDING` status does not block it,
-because `active_memberships()` lets ONBOARDING organisations in. The registrant
-is always `ORG_ADMIN`; the request has no way to set a role. Joining an
-*existing* organisation is still invite-only. An email that already has an
-account cannot register a second organisation; that account gets the same
-generic response as anyone else. It is off unless `PORTAL_ALLOW_SELF_SIGNUP=1`
-is set, and when off the register endpoint answers 404. Registration and
-verification are recorded as `PortalLoginEvent` outcomes (`registered`,
-`verified`, `verify_failed`) rather than `AuditEvent`s, because the portal may
-not import `apps.operations`. Not yet addressed:
-- An unverified registration holds its email address and slug indefinitely.
-  There is no cleanup job.
+`POST /portal/api/auth/register`. It is `ACTIVE` immediately, and the same
+request logs its admin in. **There is no email verification and no operator
+approval.** The registrant is always `ORG_ADMIN`; the request has no way to set
+a role. Joining an *existing* organisation is still invite-only. An email that
+already has an account cannot register a second organisation. It gets a 409
+(`email_taken`), which makes register an "is this address taken?" oracle; the
+per-email and per-IP throttles are what bound that. It is off unless
+`PORTAL_ALLOW_SELF_SIGNUP=1` is set, and when off the register endpoint answers
+404. Registration is recorded as a `PortalLoginEvent` (`registered`, followed
+by `success` for the session it starts) rather than an `AuditEvent`, because
+the portal may not import `apps.operations`. Not yet addressed:
+- Nothing proves the registrant owns the address. Anyone can register an
+  organisation under an email that is not theirs, and hold that address
+  against its real owner.
 - Registration does not notify operators.
+- `EmailVerificationToken` and `OrgMembership.Status.PENDING_VERIFICATION` are
+  left from the earlier verification flow. Nothing uses them any more
+  (migration 0003 activated every pending membership), but dropping them is a
+  schema migration that has not been done.
 
 All of these are open to being overruled — they are recorded rather than buried,
 here and in the architecture document's amendments table.
@@ -176,7 +179,7 @@ source scripts/dev-env.sh
 .venv/bin/python manage.py seed_demo          # prints the demo accounts
 
 DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000
-scripts/smoke-portal-api.sh                   # checks over real HTTP (SERVER_LOG=... for the verify leg)
+scripts/smoke-portal-api.sh                   # checks over real HTTP
 ```
 
 The React portal in `../frontend` proxies `/portal/api` to port 8000, so
@@ -205,7 +208,7 @@ perfectly. Arch §11.3 makes this an acceptance criterion, not a nicety.
 .venv/bin/python manage.py makemigrations --check --dry-run --settings=config.settings.portal
 lint-imports                          # the five dependency contracts
 pytest apps/portal/tests/test_registration.py apps/portal/tests/test_deploy_settings.py --ds=config.settings.portal
-SERVER_LOG=<runserver log> scripts/smoke-portal-api.sh   # checks over real HTTP
+scripts/smoke-portal-api.sh           # checks over real HTTP
 ```
 
 `.github/workflows/ci.yml` runs the first four on every push and pull request.
@@ -235,10 +238,8 @@ provably settings-independent. Treat it as deployment-blocking, like
   application code that could race.
 - **The content API** — publications, deliveries, notifications, subscription.
 - **Self-service registration** (flag-gated; see the deviation above):
-  `auth/register`, `auth/verify` and `auth/verify/resend`. Verification tokens
-  are single-use, expire after 24 hours and are stored only as a hash. Both
-  register and resend are throttled per email and per IP, and both answer
-  identically whether or not the address is known.
+  `auth/register` creates the organisation and signs its admin in, with no
+  email verification step. Throttled per email and per IP.
 
 ## What is not here yet
 

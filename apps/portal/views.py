@@ -18,7 +18,6 @@ from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_not_required
-from django.contrib.auth.hashers import make_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
@@ -40,15 +39,14 @@ from apps.tenancy.models import Organization
 from . import serializers as s
 from .auth import PortalBackend
 from .models import (
-    EmailVerificationToken,
     OrgInvite,
     OrgMembership,
     OrgRole,
     OrgUser,
     PortalLoginEvent,
 )
-from .notifications import send_invite_email, send_password_reset_email, send_verification_email
-from .tokens import hash_invite_token, hash_token
+from .notifications import send_invite_email, send_password_reset_email
+from .tokens import hash_invite_token
 
 import logging  # TEMP-DIAG
 
@@ -190,17 +188,6 @@ class LoginView(APIView):
             _record_login(
                 request, email=email, outcome=PortalLoginEvent.Outcome.NO_MEMBERSHIP, user=user
             )
-            # Only reachable with the right password, so naming the reason
-            # discloses nothing the caller does not already know — and it lets
-            # the client offer "resend the verification email".
-            if user.memberships.filter(status=OrgMembership.Status.PENDING_VERIFICATION).exists():
-                return Response(
-                    {
-                        "detail": "Confirm your email address before signing in.",
-                        "code": "email_not_verified",
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
             return Response(
                 {
                     "detail": "This account has no active organisation. Contact your administrator.",
@@ -210,17 +197,21 @@ class LoginView(APIView):
             )
 
         cache.delete(bucket)
-        # Cycles the session key and rotates the CSRF token — session fixation
-        # protection. Doing this by hand is one of the reasons not to roll your
-        # own session handling.
-        django_login(request, user, backend="apps.portal.auth.PortalBackend")
-        request.session[PORTAL_ORG_SESSION_KEY] = membership.organization_id
-        _record_login(request, email=email, outcome=PortalLoginEvent.Outcome.SUCCESS, user=user)
-
-        membership.last_seen_at = timezone.now()
-        membership.save(update_fields=["last_seen_at"])
-
+        _start_session(request, user, membership)
         return Response(s.session_payload(user, membership))
+
+
+def _start_session(request, user: OrgUser, membership: OrgMembership) -> None:
+    """Log `user` in to `membership`'s organisation. Shared by login and register."""
+    # Cycles the session key and rotates the CSRF token — session fixation
+    # protection. Doing this by hand is one of the reasons not to roll your
+    # own session handling.
+    django_login(request, user, backend="apps.portal.auth.PortalBackend")
+    request.session[PORTAL_ORG_SESSION_KEY] = membership.organization_id
+    _record_login(request, email=user.email, outcome=PortalLoginEvent.Outcome.SUCCESS, user=user)
+
+    membership.last_seen_at = timezone.now()
+    membership.save(update_fields=["last_seen_at"])
 
 
 class LogoutView(APIView):
@@ -385,21 +376,17 @@ class InviteAcceptView(APIView):
 
 # ── Self-service registration ───────────────────────────────────────────────
 # A recorded deviation from PRD §6.8 (see README.md). A new organisation is
-# created ONBOARDING with its admin's membership PENDING_VERIFICATION; the admin
-# cannot log in until they prove they own the email address, and verifying
-# activates both. Joining an existing organisation remains invite-only.
+# created ACTIVE with its admin's membership ACTIVE, and the registrant is
+# logged in by the same request. There is no email verification step. Joining
+# an existing organisation remains invite-only.
 #
-# register and resend answer identically whether or not the address is known.
-# A different status, body or noticeably different latency for "already has an
-# account" would be an account-enumeration oracle on a public endpoint.
+# Because a successful registration returns a session, an already-registered
+# address necessarily gets a different answer (409). The throttles below are
+# what bound that as an enumeration oracle.
 
-_REGISTER_ACCEPTED = {
-    "detail": "Check your inbox. If this address can be registered, "
-    "we have sent a link to confirm it.",
-}
-_RESEND_ACCEPTED = {
-    "detail": "If this address has a registration waiting to be confirmed, "
-    "a new link is on its way.",
+_EMAIL_TAKEN = {
+    "detail": "An account with this email address already exists. Sign in instead.",
+    "code": "email_taken",
 }
 _RATE_LIMITED = {"detail": "Too many attempts. Try again later.", "code": "rate_limited"}
 
@@ -422,8 +409,8 @@ def _throttle(*buckets: tuple[str, int], window: int) -> bool:
     return over
 
 
-def _create_onboarding_organization(name: str) -> Organization:
-    """A new ONBOARDING organisation with a unique slug derived from its name."""
+def _create_organization(name: str) -> Organization:
+    """A new ACTIVE organisation with a unique slug derived from its name."""
     base = slugify(name)[:40].strip("-") or "org"
     candidates = [base, *(f"{base}-{n}" for n in range(2, 11)), f"{base}-{secrets.token_hex(4)}"]
     for slug in candidates:
@@ -434,33 +421,17 @@ def _create_onboarding_organization(name: str) -> Organization:
             # enclosing registration transaction.
             with transaction.atomic():
                 return Organization.objects.create(
-                    slug=slug, name=name, status=Organization.Status.ONBOARDING
+                    slug=slug, name=name, status=Organization.Status.ACTIVE
                 )
         except IntegrityError:
             continue
     raise IntegrityError(f"Could not allocate an organisation slug for {name!r}")
 
 
-def _issue_verification_token(membership: OrgMembership) -> str:
-    """Store the hash, return the raw token. The raw value is never persisted."""
-    raw = EmailVerificationToken.new_token()
-    EmailVerificationToken.objects.create(membership=membership, token_hash=hash_token(raw))
-    return raw
-
-
-def _send_after_commit(membership: OrgMembership, raw_token: str) -> None:
-    # After commit, so a rolled-back registration never leaves a live link in
-    # someone's inbox. `robust`: a mail failure is logged rather than turned
-    # into a 500 — a 500 on this path only would itself reveal that the
-    # address was new. The user can ask for a resend.
-    transaction.on_commit(
-        lambda: send_verification_email(membership, raw_token=raw_token), robust=True
-    )
-
-
 @api_public
 class RegisterView(APIView):
-    """POST auth/register — create a new organisation and its admin."""
+    """POST auth/register — create a new organisation and its admin, and log
+    the admin in. Answers 201 with the same payload as a successful login."""
 
     permission_classes = [AllowAny]
 
@@ -485,14 +456,11 @@ class RegisterView(APIView):
 
         if OrgUser.objects.filter(email=email).exists():
             _diag.warning("TEMP-DIAG register: already-registered branch")
-            # Create nothing, reveal nothing. The hash is the expensive part of
-            # the real path; doing it here keeps the two paths' latency close.
-            make_password(data["password"])
-            return Response(_REGISTER_ACCEPTED, status=status.HTTP_202_ACCEPTED)
+            return Response(_EMAIL_TAKEN, status=status.HTTP_409_CONFLICT)
 
         try:
             with transaction.atomic():
-                organization = _create_onboarding_organization(data["organization_name"])
+                organization = _create_organization(data["organization_name"])
                 _diag.warning("TEMP-DIAG register: before create_user (hash) %s", _diag_mem())
                 user = OrgUser.objects.create_user(
                     email=email, password=data["password"], name=data["name"]
@@ -503,15 +471,12 @@ class RegisterView(APIView):
                     organization=organization,
                     # Always ADMIN. Never read from the request.
                     role=OrgRole.ADMIN,
-                    status=OrgMembership.Status.PENDING_VERIFICATION,
+                    status=OrgMembership.Status.ACTIVE,
+                    accepted_at=timezone.now(),
                 )
-                raw = _issue_verification_token(membership)
                 _record_login(
                     request, email=email, outcome=PortalLoginEvent.Outcome.REGISTERED, user=user
                 )
-                _diag.warning("TEMP-DIAG register: before on_commit, membership=%s", membership.pk)
-                _send_after_commit(membership, raw)
-                _diag.warning("TEMP-DIAG register: after on_commit, membership=%s", membership.pk)
         except IntegrityError as exc:
             # TEMP-DIAG: class and constraint only, never the message (it can
             # contain the email address).
@@ -522,117 +487,11 @@ class RegisterView(APIView):
             )
             # A concurrent registration took this email between the check and
             # the insert. Same answer as any other already-registered address.
-            pass
-        _diag.warning("TEMP-DIAG register: returning 202")
+            return Response(_EMAIL_TAKEN, status=status.HTTP_409_CONFLICT)
 
-        return Response(_REGISTER_ACCEPTED, status=status.HTTP_202_ACCEPTED)
-
-
-@api_public
-class VerifyEmailView(APIView):
-    """POST auth/verify — activate the organisation and its admin.
-
-    Does NOT log the user in. Proving control of an inbox is not the same as
-    presenting the password, and the client goes to the login screen next.
-    """
-
-    permission_classes = [AllowAny]
-
-    @transaction.atomic
-    def post(self, request):
-        form = s.VerifyEmailSerializer(data=request.data)
-        form.is_valid(raise_exception=True)
-
-        token = (
-            EmailVerificationToken.objects.select_for_update()
-            .filter(token_hash=hash_token(form.validated_data["token"]))
-            .first()
-        )
-        membership = None
-        if token is not None and token.is_usable:
-            membership = (
-                OrgMembership.objects.select_for_update()
-                .filter(pk=token.membership_id, status=OrgMembership.Status.PENDING_VERIFICATION)
-                .select_related("org_user")
-                .first()
-            )
-
-        if membership is None:
-            user = token.membership.org_user if token is not None else None
-            _record_login(
-                request,
-                email=user.email if user else "",
-                outcome=PortalLoginEvent.Outcome.VERIFY_FAILED,
-                user=user,
-            )
-            return Response(
-                {"detail": "That confirmation link is no longer valid.", "code": "invalid_token"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        now = timezone.now()
-        organization = Organization.objects.select_for_update().get(pk=membership.organization_id)
-        # Only ONBOARDING moves. An organisation an operator has suspended in
-        # the meantime stays suspended.
-        if organization.status == Organization.Status.ONBOARDING:
-            organization.status = Organization.Status.ACTIVE
-            organization.save(update_fields=["status"])
-
-        membership.status = OrgMembership.Status.ACTIVE
-        membership.accepted_at = now
-        membership.save(update_fields=["status", "accepted_at"])
-
-        token.used_at = now
-        token.save(update_fields=["used_at"])
-        EmailVerificationToken.objects.filter(
-            membership=membership, used_at__isnull=True, invalidated_at__isnull=True
-        ).update(invalidated_at=now)
-
-        _record_login(
-            request,
-            email=membership.org_user.email,
-            outcome=PortalLoginEvent.Outcome.VERIFIED,
-            user=membership.org_user,
-        )
-        return Response(
-            {"detail": "Email confirmed. You can sign in now.", "organization": organization.name}
-        )
-
-
-@api_public
-class ResendVerificationView(APIView):
-    """POST auth/verify/resend — a fresh link; every earlier unused one dies."""
-
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        form = s.ResendVerificationSerializer(data=request.data)
-        form.is_valid(raise_exception=True)
-        email = form.validated_data["email"].strip().lower()
-        ip = _client_ip(request) or "unknown"
-
-        if _throttle(
-            (f"portal-verify-resend:email:{email}", settings.PORTAL_VERIFY_RESEND_MAX_PER_EMAIL),
-            (f"portal-verify-resend:ip:{ip}", settings.PORTAL_VERIFY_RESEND_MAX_PER_IP),
-            window=settings.PORTAL_SIGNUP_WINDOW_SECONDS,
-        ):
-            _record_login(request, email=email, outcome=PortalLoginEvent.Outcome.RATE_LIMITED)
-            return Response(_RATE_LIMITED, status=status.HTTP_429_TOO_MANY_REQUESTS)
-
-        with transaction.atomic():
-            membership = (
-                OrgMembership.objects.select_for_update(of=("self",))
-                .filter(org_user__email=email, status=OrgMembership.Status.PENDING_VERIFICATION)
-                .select_related("org_user", "organization")
-                .first()
-            )
-            if membership is not None:
-                EmailVerificationToken.objects.filter(
-                    membership=membership, used_at__isnull=True, invalidated_at__isnull=True
-                ).update(invalidated_at=timezone.now())
-                _send_after_commit(membership, _issue_verification_token(membership))
-
-        return Response(_RESEND_ACCEPTED, status=status.HTTP_202_ACCEPTED)
+        _start_session(request, user, membership)
+        _diag.warning("TEMP-DIAG register: returning 201")
+        return Response(s.session_payload(user, membership), status=status.HTTP_201_CREATED)
 
 
 class TeamView(APIView):

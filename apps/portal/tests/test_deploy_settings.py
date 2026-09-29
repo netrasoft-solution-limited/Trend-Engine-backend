@@ -32,6 +32,7 @@ def test_defaults_when_nothing_is_set():
         "EMAIL_HOST_USER": "",
         "EMAIL_HOST_PASSWORD": "",
         "EMAIL_USE_TLS": False,
+        "EMAIL_TIMEOUT": 10,
         "DEFAULT_FROM_EMAIL": "Trend Engine <no-reply@localhost>",
     }
 
@@ -45,6 +46,7 @@ def test_values_from_the_environment():
             "EMAIL_HOST_USER": "fake-user",
             "EMAIL_HOST_PASSWORD": "fake-password",
             "EMAIL_USE_TLS": "1",
+            "EMAIL_TIMEOUT": "5",
             "DEFAULT_FROM_EMAIL": "Example <no-reply@example.test>",
         }
     ) == {
@@ -54,6 +56,7 @@ def test_values_from_the_environment():
         "EMAIL_HOST_USER": "fake-user",
         "EMAIL_HOST_PASSWORD": "fake-password",
         "EMAIL_USE_TLS": True,
+        "EMAIL_TIMEOUT": 5,
         "DEFAULT_FROM_EMAIL": "Example <no-reply@example.test>",
     }
 
@@ -67,6 +70,7 @@ def test_blank_values_count_as_unset():
             "EMAIL_PORT",
             "EMAIL_HOST_USER",
             "EMAIL_USE_TLS",
+            "EMAIL_TIMEOUT",
             "DEFAULT_FROM_EMAIL",
         )
     }
@@ -88,7 +92,7 @@ def test_use_tls_accepts_the_usual_spellings(raw, expected):
     assert email_settings({"EMAIL_USE_TLS": raw})["EMAIL_USE_TLS"] is expected
 
 
-@pytest.mark.parametrize(("name", "raw"), [("EMAIL_USE_TLS", "maybe"), ("EMAIL_PORT", "smtp")])
+@pytest.mark.parametrize(("name", "raw"), [("EMAIL_USE_TLS", "maybe"), ("EMAIL_PORT", "smtp"), ("EMAIL_TIMEOUT", "10s")])
 def test_malformed_values_fail_naming_the_variable(name, raw):
     with pytest.raises(RuntimeError, match=name):
         email_settings({name: raw})

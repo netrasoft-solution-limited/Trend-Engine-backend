@@ -111,14 +111,6 @@ class RegisterSerializer(serializers.Serializer):
     password = _PasswordField()
 
 
-class VerifyEmailSerializer(serializers.Serializer):
-    token = serializers.CharField(max_length=128)
-
-
-class ResendVerificationSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-
-
 class InviteCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(choices=OrgRole.choices, default=OrgRole.VIEWER)

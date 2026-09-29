@@ -10,15 +10,9 @@
 #
 # Usage:
 #   source scripts/dev-env.sh              # sets PORTAL_ALLOW_SELF_SIGNUP=1
-#   DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000 \
-#       > /tmp/portal-server.log 2>&1 &
+#   DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000 &
 #   .venv/bin/python manage.py seed_demo
-#   SERVER_LOG=/tmp/portal-server.log scripts/smoke-portal-api.sh
-#
-# SERVER_LOG is optional. The console email backend prints the verification
-# link to the server's stdout, and that is the only place this script can read
-# it from; without it, the verify → login leg of the registration checks is
-# skipped (and says so).
+#   scripts/smoke-portal-api.sh
 set -u
 B=http://127.0.0.1:8000/portal/api
 pass=0; fail=0
@@ -121,33 +115,12 @@ echo ""
 STAMP=$(date +%s)
 NEW="smoke-$STAMP@example.test"
 PW="smoke-test-pass-2026"
-check "register is accepted"                202 "$(post reg /auth/register "{\"organization_name\":\"Smoke Test $STAMP\",\"name\":\"Smoke\",\"email\":\"$NEW\",\"password\":\"$PW\"}")"
-FIRST=$(body)
-check "existing email: same status"         202 "$(post reg /auth/register "{\"organization_name\":\"Takeover $STAMP\",\"name\":\"X\",\"email\":\"$NEW\",\"password\":\"$PW\"}")"
-check "existing email: identical body"      "$FIRST" "$(body)"
-check "unverified login is refused"         403 "$(post reg /auth/login "{\"email\":\"$NEW\",\"password\":\"$PW\"}")"
-check "  … as email_not_verified"           email_not_verified "$(field code)"
-check "bogus verify token is refused"       400 "$(post reg /auth/verify '{"token":"not-a-real-token"}')"
-check "resend is accepted"                  202 "$(post reg /auth/verify/resend "{\"email\":\"$NEW\"}")"
-RESENT=$(body)
-check "resend, unknown email: same status"  202 "$(post reg /auth/verify/resend "{\"email\":\"nobody-$STAMP@example.test\"}")"
-check "resend, unknown email: same body"    "$RESENT" "$(body)"
-
-if [ -n "${SERVER_LOG:-}" ] && [ -r "$SERVER_LOG" ]; then
-  # The newest link is the resend's; the resend invalidated the first one.
-  TOKEN=$(grep -o '/portal/verify-email/[A-Za-z0-9_-]*' "$SERVER_LOG" | tail -1 | sed 's|.*/||')
-  check "verify activates"                  200 "$(post reg /auth/verify "{\"token\":\"$TOKEN\"}")"
-  check "verified token cannot be reused"   400 "$(post reg /auth/verify "{\"token\":\"$TOKEN\"}")"
-  check "verified admin logs in"            200 "$(post reg /auth/login "{\"email\":\"$NEW\",\"password\":\"$PW\"}")"
-  check "  … as org_admin"                  org_admin "$(field role)"
-else
-  echo "  skip verify → login (set SERVER_LOG to the runserver output file to include it)"
-fi
-
-# Uses its own address so the per-email bucket it exhausts is throwaway.
-RL="ratelimit-$STAMP@example.test"
-for _ in 1 2 3; do post rl /auth/verify/resend "{\"email\":\"$RL\"}" >/dev/null; done
-check "resend is rate limited"              429 "$(post rl /auth/verify/resend "{\"email\":\"$RL\"}")"
+check "register signs the admin in"         201 "$(post reg /auth/register "{\"organization_name\":\"Smoke Test $STAMP\",\"name\":\"Smoke\",\"email\":\"$NEW\",\"password\":\"$PW\"}")"
+check "  … as org_admin"                    org_admin "$(field role)"
+check "session resolves straight away"      200 "$(get reg /auth/session)"
+check "existing email is refused"           409 "$(post other /auth/register "{\"organization_name\":\"Takeover $STAMP\",\"name\":\"X\",\"email\":\"$NEW\",\"password\":\"$PW\"}")"
+check "  … as email_taken"                  email_taken "$(field code)"
+check "registered admin logs in again"      200 "$(post relogin /auth/login "{\"email\":\"$NEW\",\"password\":\"$PW\"}")"
 
 echo ""
 echo "Logout"

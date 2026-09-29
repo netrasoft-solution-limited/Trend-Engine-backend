@@ -62,6 +62,11 @@ def email_settings(environ: Mapping[str, str]) -> dict[str, Any]:
         # Not stripped: a password may legitimately begin or end with a space.
         "EMAIL_HOST_PASSWORD": environ.get("EMAIL_HOST_PASSWORD", ""),
         "EMAIL_USE_TLS": _bool(environ, "EMAIL_USE_TLS", False),
+        # Seconds. Django's default is no timeout, so an SMTP server that
+        # accepts the connection and then goes quiet holds the worker until
+        # gunicorn kills it. With a timeout the send fails with a real error,
+        # which on_commit(robust=True) logs.
+        "EMAIL_TIMEOUT": _int(environ, "EMAIL_TIMEOUT", 10),
         "DEFAULT_FROM_EMAIL": _text(
             environ, "DEFAULT_FROM_EMAIL", "Trend Engine <no-reply@localhost>"
         ),
