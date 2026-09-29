@@ -14,3 +14,6 @@ deploy/.env
 *.pem
 # curl cookie jars hold live session cookies.
 cookies.txt
+
+# Build artifact from `pip install -e .`
+*.egg-info/
