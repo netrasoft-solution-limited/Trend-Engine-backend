@@ -52,4 +52,18 @@ MIDDLEWARE = COMMON_MIDDLEWARE + [
 ]
 
 # PRD §7.1: no open registration anywhere, MFA where supported.
-OPERATOR_REQUIRE_MFA = True
+#
+# The second factor (TOTP) is NOT BUILT YET. Until it is, ops login checks the
+# password and then REFUSES with `mfa_not_implemented` while this is True — so
+# production has no ops login at all, rather than a password-only one.
+#
+# Local development turns it off with OPS_PASSWORD_ONLY_LOGIN=1, and that is
+# honoured only with DEBUG on: an environment variable set by mistake in
+# production cannot weaken it. apps/operations/tests/test_ops_settings.py fails
+# if any settings module resolves this to False with DEBUG off.
+OPERATOR_REQUIRE_MFA = not (DEBUG and env("OPS_PASSWORD_ONLY_LOGIN", "0") == "1")  # noqa: F405
+
+#: Failed operator logins per email per window. Stricter than the portal: an
+#: operator session reads every tenant's data.
+OPERATOR_LOGIN_MAX_ATTEMPTS = 5
+OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60

@@ -124,6 +124,17 @@ the portal may not import `apps.operations`. Not yet addressed:
   (migration 0003 activated every pending membership), but dropping them is a
   schema migration that has not been done.
 
+**Ops login is disabled in production until real MFA (TOTP) is built.** PRD
+§7.1 requires a second factor for operators, and none exists yet. While
+`OPERATOR_REQUIRE_MFA` is True — always, with `DEBUG` off —
+`POST /ops/api/auth/login` checks the password and then refuses with 403
+`mfa_not_implemented`, creating no session. There is deliberately no
+password-only operator login in production. Local development turns the guard
+off with `OPS_PASSWORD_ONLY_LOGIN=1` (set by `scripts/dev-env.sh`), which is
+honoured only with `DJANGO_DEBUG=1`; login then answers `"mfa_required": false`.
+`apps/operations/tests/test_ops_settings.py` fails if any settings module
+resolves the guard to False with `DEBUG` off.
+
 All of these are open to being overruled — they are recorded rather than buried,
 here and in the architecture document's amendments table.
 
@@ -177,10 +188,16 @@ docker run -d --name te-redis -p 6379:6379 redis:7-alpine
 source scripts/dev-env.sh
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py seed_demo          # prints the demo accounts
+.venv/bin/python manage.py seed_triage        # signals, sources, runs for the Triage home
 
 DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000
-scripts/smoke-portal-api.sh                   # checks over real HTTP
+.venv/bin/python manage.py runserver 8001     # the ops plane (ops settings are the default)
+scripts/smoke-portal-api.sh                   # checks over real HTTP, both planes
 ```
+
+The ops JSON API is under `/ops/api/` on port 8001. Sign in with the operator
+account `seed_demo` prints; that works locally only because `dev-env.sh` turns
+the MFA guard off (see the deviation above).
 
 The React portal in `../frontend` proxies `/portal/api` to port 8000, so
 `npm run dev` there gives you the whole stack.
@@ -208,6 +225,7 @@ perfectly. Arch §11.3 makes this an acceptance criterion, not a nicety.
 .venv/bin/python manage.py makemigrations --check --dry-run --settings=config.settings.portal
 lint-imports                          # the five dependency contracts
 pytest apps/portal/tests/test_registration.py apps/portal/tests/test_deploy_settings.py --ds=config.settings.portal
+pytest apps/operations apps/scoring apps/intelligence apps/sources apps/ingestion   # ops settings
 scripts/smoke-portal-api.sh           # checks over real HTTP
 ```
 
@@ -240,14 +258,28 @@ provably settings-independent. Treat it as deployment-blocking, like
 - **Self-service registration** (flag-gated; see the deviation above):
   `auth/register` creates the organisation and signs its admin in, with no
   email verification step. Throttled per email and per IP.
+- **The operator auth API** under `/ops/api/auth/` — `csrf`, `login`, `logout`,
+  `session`. The portal's pattern (session cookie, CSRF endpoint, DRF views,
+  default-deny routing) with `OperatorBackend`. Rate-limited login. Refuses
+  every login in production until MFA exists (see the deviation above).
+- **The Triage summary**, `GET /ops/api/triage/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`
+  (`apps/scoring/triage.py`). Operator-only. Without dates it uses the latest
+  digest's window; bad dates, one date alone, or `from` after `to` are a 400.
+  Four aggregate queries plus one for the default window, however many rows.
+  The top candidate is ranked for the organisation the operator has narrowed
+  scope to, or on domain score alone.
+- **The Triage data models** — `Signal` and `Digest` (intelligence),
+  `ClientSignalScore` and the candidate ranking (scoring), `Source` (sources),
+  `IngestionRun` (ingestion) — with only the fields the summary needs, and
+  `seed_triage` to load the ops frontend mock's numbers.
 
 ## What is not here yet
 
-- **The operator plane has no UI.** `config/urls_ops.py` includes app URLconfs
-  that are still empty. `manage.py` and the tests run under ops settings, so the
-  models and admin work; there are no operator views.
-- **The evidence pipeline** — L1 to L4 — is still the original skeleton. No
-  connectors, no ingestion, no scoring.
+- **Operator MFA (TOTP).** Until it exists, ops login is refused in production.
+- **The operator plane has no UI and little API.** Beyond auth and the Triage
+  summary, `config/urls_ops.py` includes app URLconfs that are still empty.
+- **The evidence pipeline** — L1 to L4 — is still the original skeleton. The
+  Triage models hold data; nothing collects or scores it yet.
 - **`conftest.py` fixtures still raise `NotImplementedError`,** so the tenancy
   suites read as specifications and do not yet assert. `scripts/smoke-portal-api.sh`
   covers the same ground over HTTP in the meantime.

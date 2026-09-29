@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end drive of the portal API over real HTTP.
+# End-to-end drive of the portal API — and the ops API, if it is running — over
+# real HTTP.
 #
 # Asserts the properties that matter most and that a unit test cannot reach,
 # because they depend on the whole stack agreeing: middleware binding,
@@ -9,12 +10,18 @@
 # is not visible to the client, and a WITHDRAWN one resolves to nothing.
 #
 # Usage:
-#   source scripts/dev-env.sh              # sets PORTAL_ALLOW_SELF_SIGNUP=1
+#   source scripts/dev-env.sh              # sets PORTAL_ALLOW_SELF_SIGNUP=1 and
+#                                          # OPS_PASSWORD_ONLY_LOGIN=1
 #   DJANGO_SETTINGS_MODULE=config.settings.portal .venv/bin/python manage.py runserver 8000 &
+#   .venv/bin/python manage.py runserver 8001 &     # optional: the ops checks
 #   .venv/bin/python manage.py seed_demo
+#   .venv/bin/python manage.py seed_triage          # for the Triage summary checks
 #   scripts/smoke-portal-api.sh
 set -u
-B=http://127.0.0.1:8000/portal/api
+PORTAL=http://127.0.0.1:8000/portal/api
+OPS=http://127.0.0.1:8001/ops/api
+# The helpers below send every request to $B. The ops section points it at $OPS.
+B=$PORTAL
 pass=0; fail=0
 
 # Cookie jars and response bodies live in a private temp dir, removed on exit.
@@ -127,6 +134,33 @@ echo "Logout"
 echo ""
 check "logout succeeds"                     204 "$(post dana /auth/logout '{}')"
 check "session gone after logout"           401 "$(get dana /auth/session)"
+
+echo ""
+echo "Ops API (runserver 8001, dev-env.sh, seed_demo + seed_triage)"
+echo ""
+B=$OPS
+if [ "$(curl -s -o /dev/null -w "%{http_code}" "$OPS/auth/csrf")" != "200" ]; then
+  echo "  skip ops checks — nothing answering on $OPS"
+else
+  OP_EMAIL=abubakar@pureplay.example
+  check "signed out: session is 401"          401 "$(get op /auth/session)"
+  check "signed out: summary is 401"          401 "$(get op /triage/summary)"
+  check "wrong password is 401"               401 "$(post op /auth/login "{\"email\":\"$OP_EMAIL\",\"password\":\"wrong\"}")"
+  # 403 mfa_not_implemented here means the server is not running with
+  # dev-env.sh's OPS_PASSWORD_ONLY_LOGIN=1 and DJANGO_DEBUG=1.
+  check "login succeeds (MFA guard off)"      200 "$(post op /auth/login "{\"email\":\"$OP_EMAIL\",\"password\":\"portal-demo-2026\"}")"
+  check "  … without MFA"                     False "$(field mfa_required)"
+  check "session now resolves"                200 "$(get op /auth/session)"
+  check "summary, last window"                200 "$(get op /triage/summary)"
+  check "  … 12 new candidates"               12 "$(field new_candidates)"
+  check "  … top candidate SIG-2041"          SIG-2041 "$(field top_candidate_id)"
+  check "summary, explicit window"            200 "$(get op '/triage/summary?from=2026-09-13&to=2026-09-20')"
+  check "summary, from after to is 400"       400 "$(get op '/triage/summary?from=2026-09-20&to=2026-09-13')"
+  check "summary, bad date is 400"            400 "$(get op '/triage/summary?from=2026-13-01&to=2026-09-20')"
+  check "logout succeeds"                     204 "$(post op /auth/logout '{}')"
+  check "session gone after logout"           401 "$(get op /auth/session)"
+fi
+B=$PORTAL
 
 echo ""
 if [ "$fail" -gt 0 ]; then echo "$fail failed, $pass passed"; exit 1; fi
