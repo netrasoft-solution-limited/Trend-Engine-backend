@@ -145,7 +145,7 @@ def test_the_cap_refuses_before_the_call_is_made(source, settings):
     item = make_item(source)
     transport = FakeTransport([respond(gate.GateVerdict(relevant=True, reason="x", confidence=1))])
 
-    result = gate.assess(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
+    gate.assess(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
     item.refresh_from_db()
 
     assert transport.calls == [], "the cap must refuse before the request is sent"

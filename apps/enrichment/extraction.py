@@ -113,11 +113,11 @@ def _segment(text: str, size: int = SEGMENT_CHARS) -> list[tuple[int, int, str]]
         if end < length:
             window = text[position:end]
             # Prefer a sentence end in the last quarter of the window.
-            match = None
-            for match in re.finditer(r"[.!?]\s", window):
-                pass
-            if match and match.end() > size * 0.75:
-                end = position + match.end()
+            # The LAST sentence end in the window, not the first: breaking at
+            # the first would make every segment a sentence long.
+            ends = [m.end() for m in re.finditer(r"[.!?]\s", window)]
+            if ends and ends[-1] > size * 0.75:
+                end = position + ends[-1]
         body = text[position:end].strip()
         if body:
             chunks.append((position, end, body))
@@ -141,6 +141,7 @@ def build_segments(item: ContentItem) -> list[ContentSegment]:
     if transcript is None or not transcript.text.strip():
         return []
 
+    anchors = transcript.anchors or []
     segments = [
         ContentSegment(
             content_item=item,
@@ -148,11 +149,37 @@ def build_segments(item: ContentItem) -> list[ContentSegment]:
             text=body,
             start_char=start,
             end_char=end,
+            start_seconds=_seconds_at(anchors, start),
+            end_seconds=_seconds_at(anchors, end),
         )
         for ordinal, (start, end, body) in enumerate(_segment(transcript.text), start=1)
     ]
     ContentSegment.objects.bulk_create(segments)
     return list(item.segments.all())
+
+
+def _seconds_at(anchors: list, char_index: int) -> float | None:
+    """The audio position of a character offset, from the transcript's anchors.
+
+    Anchors are sparse — one per caption cue, not one per character — so this
+    takes the last anchor at or before the offset: the moment the speech
+    containing that character began. Binary search, because a long transcript
+    has thousands of anchors and every segment asks twice.
+    """
+    if not anchors:
+        return None
+
+    low, high = 0, len(anchors) - 1
+    best: float | None = None
+    while low <= high:
+        mid = (low + high) // 2
+        seconds, position = anchors[mid][0], anchors[mid][1]
+        if position <= char_index:
+            best = seconds
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
 
 
 def _render(segments: list[ContentSegment]) -> str:

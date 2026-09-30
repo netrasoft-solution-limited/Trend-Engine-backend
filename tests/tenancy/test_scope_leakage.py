@@ -14,10 +14,14 @@ from __future__ import annotations
 import pytest
 
 from apps.tenancy.context import scoped
+from conftest import tenant_scoped_models
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.tenancy]
 
-TENANT_SCOPED_MODELS: list[type] = []
+#: DISCOVERED from the model registry, not hand-listed. A hand-maintained list
+#: is a list someone forgets to add to, and the suite stays green while the new
+#: model goes uncovered — the exact failure Arch §5.4 is guarding against.
+TENANT_SCOPED_MODELS: list[type] = tenant_scoped_models()
 
 #: Every URL name the portal exposes that takes an object id. Each one is a
 #: place a client could try another tenant's primary key.

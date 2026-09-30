@@ -14,14 +14,15 @@ Two rules are encoded here rather than left to convention:
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
-from typing import Iterable, Protocol, runtime_checkable
+from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 
-class Capability(str, Enum):
+class Capability(StrEnum):
     DISCOVERY = "DISCOVERY"
     METADATA = "METADATA"
     TRANSCRIPT = "TRANSCRIPT"
@@ -84,11 +85,11 @@ class Connector(Protocol):
 
     capabilities: set[Capability]
     #: Access basis. No policy, no run — enforced in `BaseConnector.__init__`.
-    policy: "object"
+    policy: object
 
     def discover(self, window: DateWindow) -> Iterable[ItemRef]: ...
 
-    def fetch_metadata(self, refs: list[ItemRef]) -> Iterable["object"]: ...
+    def fetch_metadata(self, refs: list[ItemRef]) -> Iterable[object]: ...
 
     def fetch_content(self, ref: ItemRef) -> ContentResult: ...
 

@@ -84,12 +84,28 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: lint-imports
 
-      - name: pytest (portal)
+      # Two runs, because one process cannot hold both settings modules: the
+      # user model is resolved at import time, so the registry is fixed for the
+      # life of the process. Each plane is tested under the settings it actually
+      # deploys with — testing the portal through the operator URLconf would
+      # pass while proving nothing about the real request path.
+
+      - name: pytest (ops plane)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: >-
-          pytest apps/portal/tests/test_registration.py
-          apps/portal/tests/test_deploy_settings.py
-          --ds=config.settings.portal -v
+          pytest
+          --ignore=apps/portal/tests/test_registration.py
+          --ignore=apps/portal/tests/test_deploy_settings.py
+
+      - name: pytest (portal plane)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pytest apps/portal --ds=config.settings.portal
+
+      # Arch §5.4: these block deployment. Asserted to have RUN, not merely to
+      # have passed — a suite that silently collected nothing is green too.
+      - name: The deployment-blocking suites actually ran
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pytest -m "tenancy or publication" --ds=config.settings.ops -v
 
   # Manual: Actions → ci → "Run workflow". Generates any migrations the models
   # imply and uploads the NEW files only, for adding to the repo by hand.

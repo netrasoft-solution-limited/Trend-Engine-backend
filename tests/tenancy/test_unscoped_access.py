@@ -15,7 +15,7 @@ import pytest
 from apps.tenancy.context import UNSET, current_tenant, operator_scope, scoped
 from apps.tenancy.exceptions import TenantScopeError
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.tenancy]
 
 #: Every concrete model inheriting TenantScopedModel. Parametrised so that a
 #: new tenant-scoped model is covered the moment it is added, rather than when

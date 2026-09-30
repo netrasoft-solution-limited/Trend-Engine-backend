@@ -28,7 +28,7 @@ class FakeResponse:
 
 
 class FakeMessages:
-    def __init__(self, outer: "FakeTransport") -> None:
+    def __init__(self, outer: FakeTransport) -> None:
         self._outer = outer
 
     def parse(self, **kwargs) -> FakeResponse:

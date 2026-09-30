@@ -32,6 +32,8 @@ from apps.tenancy.context import (
 )
 from apps.tenancy.exceptions import TenantEscalationError
 
+pytestmark = pytest.mark.tenancy
+
 ops_settings = importlib.import_module("config.settings.ops")
 portal_settings = importlib.import_module("config.settings.portal")
 

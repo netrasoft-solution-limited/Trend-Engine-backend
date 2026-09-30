@@ -156,6 +156,12 @@ class TranscriptArtifact(models.Model):
     )
     method = models.CharField(max_length=32, choices=Method.choices)
     text = models.TextField()
+    #: `[[start_seconds, char_index], ...]` — where each piece of speech begins,
+    #: in both the audio and the flattened text. Captions and ASR carry timing;
+    #: an article does not, so this is empty for text sources. It is what lets
+    #: `ContentSegment.start_seconds` be a real position rather than a guess,
+    #: and so what makes "at 14:32 he says" resolvable from a stored claim.
+    anchors = models.JSONField(default=list, blank=True)
     #: 0-100. Publisher transcripts score high; ASR on poor audio scores low.
     quality = models.PositiveSmallIntegerField(default=0)
     #: What this rung cost, so transcript spend is attributable per item.

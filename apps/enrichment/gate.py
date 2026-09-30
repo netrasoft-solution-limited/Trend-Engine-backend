@@ -107,7 +107,11 @@ def _describe(item: ContentItem) -> str:
         lines.append(f"\nDescription:\n{item.description[:4000]}")
 
     extras = item.gate_metadata or {}
-    for label, key in (("Show notes", "show_notes"), ("Chapters", "chapters"), ("Guests", "guests")):
+    for label, key in (
+        ("Show notes", "show_notes"),
+        ("Chapters", "chapters"),
+        ("Guests", "guests"),
+    ):
         value = extras.get(key)
         if not value:
             continue
