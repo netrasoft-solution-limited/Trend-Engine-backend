@@ -17,6 +17,7 @@ from apps.sources.models import AcquisitionProvider, ProviderPolicyVersion, Sour
 
 from .providers.apify import YOUTUBE, ActorConfig, ApifyActorConnector
 from .providers.assemblyai import DEFAULT_MODEL, AssemblyAIConnector
+from .providers.taddy import TaddyConnector
 
 
 class ConnectorUnavailable(RuntimeError):
@@ -78,6 +79,21 @@ def apify_for(source: Source, *, config: ActorConfig = YOUTUBE) -> ApifyActorCon
         policy=source.policy or _live_policy(provider),
         token=_credential(provider),
         config=config,
+    )
+
+
+def taddy_for(source: Source) -> TaddyConnector:
+    """Taddy needs BOTH secrets, so both are resolved before construction.
+
+    Failing here names the missing half. Letting it through would surface as an
+    auth error that reads like a bad key, and reissuing the key does not fix it.
+    """
+    provider = _provider(AcquisitionProvider.Kind.TADDY)
+    return TaddyConnector(
+        source=source,
+        policy=source.policy or _live_policy(provider),
+        api_key=_credential(provider, "api_key"),
+        user_id=_credential(provider, "user_id"),
     )
 
 
