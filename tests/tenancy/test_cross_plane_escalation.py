@@ -19,7 +19,6 @@ import importlib
 import os
 
 import pytest
-
 from django.conf import settings
 
 from apps.tenancy.context import (
@@ -118,10 +117,10 @@ def test_session_cookies_are_host_prefixed_when_secure():
     Local development cannot set a Secure cookie over plain HTTP, so the prefix
     is dropped there and only there.
     """
-    for settings in (ops_settings, portal_settings):
-        assert settings.SESSION_COOKIE_PATH == "/"
-        if settings.SESSION_COOKIE_SECURE:
-            assert settings.SESSION_COOKIE_NAME.startswith("__Host-")
+    for plane in (ops_settings, portal_settings):
+        assert plane.SESSION_COOKIE_PATH == "/"
+        if plane.SESSION_COOKIE_SECURE:
+            assert plane.SESSION_COOKIE_NAME.startswith("__Host-")
 
 
 def test_the_two_planes_use_different_user_models():

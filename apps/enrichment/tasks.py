@@ -18,6 +18,7 @@ import logging
 from celery import shared_task
 
 from apps.evidence.models import ContentItem
+from apps.evidence.services import transcripts
 
 from . import extraction, gate
 from .llm.costs import CostCapExceeded
@@ -72,22 +73,44 @@ def assess_relevance(self, content_item_id: int) -> dict:
 def acquire_transcript(self, content_item_id: int) -> dict:
     """Walk the fallback ladder for one item's full text.
 
-    Not implemented: the rungs are Taddy, Apify subtitles and AssemblyAI, and
-    none of their connectors exist yet (`apps/connectors/providers/*.py` are
-    one-line stubs, and none can be constructed without a
-    `ProviderPolicyVersion`). `apps/connectors/chains.py` already declares the
-    ladder as data, so this becomes a walk over `DEFAULT_CHAINS` rather than
-    new branching when those land.
+    The walk itself is in `apps.evidence.services.transcripts` — acquiring a
+    transcript produces evidence rather than enriching it, and that module can
+    see both the connectors and the models. This task is the queue boundary and
+    the retry policy, nothing else.
 
-    Until then an item reaching here keeps whatever state it has, which for a
-    metadata-only item means extraction correctly refuses it.
+    It runs on `enrich` rather than `ingest`, despite being I/O-bound, because
+    the AssemblyAI rung bills by the hour. Arch §11.1 sizes `enrich` narrow for
+    exactly that reason: "the queue is narrow because the spend behind it is
+    the largest variable in the cost model".
     """
-    logger.info(
-        "Transcript acquisition not yet implemented for item %s — "
-        "connectors for Taddy / Apify / AssemblyAI are still stubs.",
-        content_item_id,
-    )
-    return {"skipped": "no transcript connector"}
+    item = ContentItem.objects.filter(pk=content_item_id).first()
+    if item is None:
+        return {"skipped": "no such item"}
+
+    outcome = transcripts.acquire(item)
+
+    if outcome.succeeded:
+        # Only now is there anything to extract from.
+        extract_evidence.delay(item.pk)
+    elif outcome.retryable:
+        # Something broke rather than being absent, so the item has NOT been
+        # written off as metadata-only. Retry with the backoff in
+        # config/celery.py; on the last attempt let it settle and leave the
+        # item for the next scheduled pass rather than failing loudly.
+        broken = [r for r in outcome.rungs if r.status == transcripts.Status.FAILED]
+        logger.warning(
+            "Transcript rungs failed transiently for item %s: %s",
+            content_item_id,
+            "; ".join(f"{r.step}: {r.detail}" for r in broken),
+        )
+        raise self.retry(exc=RuntimeError(str(outcome)))
+
+    return {
+        "method": outcome.method,
+        "chars": outcome.chars,
+        "cost_usd": str(outcome.cost_usd),
+        "rungs": [(r.step, r.status) for r in outcome.rungs],
+    }
 
 
 @shared_task(bind=True, name="apps.enrichment.tasks.extract_evidence")
