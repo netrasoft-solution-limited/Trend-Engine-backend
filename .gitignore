@@ -11,6 +11,9 @@ htmlcov/
 
 # Secrets — PRD §7.1: outside source control, separate prod/dev credentials.
 deploy/.env
+# Real vendor keys for local development. scripts/dev-env.sh is COMMITTED and
+# holds only throwaway values; anything live goes here and is sourced by it.
+scripts/secrets.local.sh
 *.pem
 # curl cookie jars hold live session cookies.
 cookies.txt

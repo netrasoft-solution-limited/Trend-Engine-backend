@@ -212,6 +212,8 @@ class LLMClient:
             )
             raise LLMInvalidOutput(f"{purpose}: response carried no schema-valid output.")
 
+        _warn_if_cache_is_a_no_op(purpose, system, tokens)
+
         self._record(
             purpose=purpose, outcome=ModelRun.Outcome.SUCCEEDED, tier=tier,
             prompt_version=prompt_version, content_item=content_item,
@@ -275,6 +277,48 @@ class LLMClient:
                 run_id=str(run.pk),
             )
         return run
+
+
+#: Anthropic's minimum cacheable prefix is model-dependent — between 512 and
+#: 4096 tokens. Below it, `cache_control` is accepted and silently ignored.
+#: Used here only to decide whether a zero-cache result is worth a warning.
+MIN_CACHEABLE_TOKENS = 1024
+
+
+def _warn_if_cache_is_a_no_op(purpose: str, system: Any, tokens: dict) -> None:
+    """Say so when a marked prefix cached nothing.
+
+    A prefix shorter than the model's minimum is accepted and ignored — no
+    error, no cache, and the `cache_control` in the request is decoration. That
+    is a silent waste, and silent is the problem: the code looks like it is
+    caching, the bill says otherwise, and nothing connects the two.
+
+    Only fires on a marked prompt that neither wrote nor read, and only for
+    prefixes plausibly near the threshold — a long prefix that fails to cache
+    is a different bug and deserves a different message.
+    """
+    marked = isinstance(system, list) and any("cache_control" in b for b in system)
+    if not marked:
+        return
+    if tokens["cache_read_tokens"] or tokens["cache_write_tokens"]:
+        return
+
+    approx = len(str(system)) // 4
+    if approx < MIN_CACHEABLE_TOKENS:
+        logger.warning(
+            "%s: the cached prefix is ~%s tokens, below Anthropic's minimum "
+            "cacheable prefix, so cache_control did nothing. Caching starts "
+            "working once the domain pack is a real taxonomy rather than a "
+            "placeholder — until then this call pays full input price.",
+            purpose, approx,
+        )
+    else:
+        logger.warning(
+            "%s: a %s-token prefix was marked for caching but neither wrote nor "
+            "read. Something volatile is in the cached block — a timestamp, an "
+            "item id — invalidating it on every call.",
+            purpose, approx,
+        )
 
 
 def tokens_summary(inp: int, out: int, cache_read: int, cache_write: int) -> dict:

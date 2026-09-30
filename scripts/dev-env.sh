@@ -22,6 +22,12 @@ export POSTGRES_PORT=5433
 
 export REDIS_URL="redis://127.0.0.1:6379/0"
 
+# Arch §10.2's ceiling, enforced before every model call. Low on purpose for
+# development: a runaway loop should stop within pennies, not within the
+# production budget. Unset means unmetered, and the guard says so loudly.
+export LLM_MONTHLY_CAP_USD=5.00
+export LLM_PER_CALL_MAX_USD=0.25
+
 # Self-service organisation registration. Off by default in code and in
 # production (deploy/.env.example); on here so the smoke script can drive it.
 export PORTAL_ALLOW_SELF_SIGNUP=1
@@ -39,3 +45,9 @@ export LOG_LEVEL=INFO
 # This switch lets local development work without weakening the defaults for
 # anyone who forgets to set it.
 export DJANGO_INSECURE_COOKIES=1
+
+# Live vendor keys, if present. Gitignored — see scripts/secrets.local.sh.
+# Absent on a fresh clone, which is why every connector must degrade to a clear
+# "no credentials" error rather than a confusing failure deep in a request.
+[ -f "$(dirname "${BASH_SOURCE[0]:-scripts/dev-env.sh}")/secrets.local.sh" ] \
+  && source "$(dirname "${BASH_SOURCE[0]:-scripts/dev-env.sh}")/secrets.local.sh"
