@@ -268,6 +268,27 @@ provably settings-independent. Treat it as deployment-blocking, like
   Four aggregate queries plus one for the default window, however many rows.
   The top candidate is ranked for the organisation the operator has narrowed
   scope to, or on domain score alone.
+- **The relevance gate** (`apps/enrichment/gate.py`). Arch §6.2's
+  metadata-only screen: title, description, show notes and guests only — never
+  audio, never a transcript, because avoiding that fetch is the entire point.
+  Cheap tier (Haiku). ~5% of rejections are pulled through anyway, which is the
+  guard against a filter that quietly narrows to what the taxonomy already
+  knows. Rejection reasons are stored so filter quality is auditable.
+- **Extraction** (`apps/enrichment/extraction.py`). Claims and questions, each
+  anchored to the `ContentSegment` that said it. A claim whose quote is not
+  verbatim in its segment is DROPPED and counted — PRD §5 principle 1 means a
+  claim nobody can locate is an assertion, not evidence. Runs once per item,
+  ever (Arch §10.3).
+- **Cost governance as a runtime component** (`apps/enrichment/llm/`). The cap
+  is checked BEFORE each call and refuses it (Arch §10.2); every call writes a
+  `ModelRun` with model, prompt version and tokens (Arch §8.2) and a
+  `CostEvent` (Arch §10.1); the domain pack rides in a cached prompt prefix.
+  Models are tiered by task, not by habit.
+- **L2 evidence** — `ContentItem`, `ContentSegment`, `TranscriptArtifact`, with
+  the PRD §6.2 idempotency key `(source, external_id, content_hash)`. Plus
+  `AcquisitionProvider` and `ProviderPolicyVersion`, which unblock every
+  connector: `apps/connectors/base.py` has always refused to construct without
+  a policy, and until now no model could supply one.
 - **The Triage data models** — `Signal` and `Digest` (intelligence),
   `ClientSignalScore` and the candidate ranking (scoring), `Source` (sources),
   `IngestionRun` (ingestion) — with only the fields the summary needs, and
@@ -278,8 +299,20 @@ provably settings-independent. Treat it as deployment-blocking, like
 - **Operator MFA (TOTP).** Until it exists, ops login is refused in production.
 - **The operator plane has no UI and little API.** Beyond auth and the Triage
   summary, `config/urls_ops.py` includes app URLconfs that are still empty.
-- **The evidence pipeline** — L1 to L4 — is still the original skeleton. The
-  Triage models hold data; nothing collects or scores it yet.
+- **Acquisition.** The gate and extractor work; nothing feeds them yet. The
+  Taddy, Apify and AssemblyAI connectors are still one-line stubs, so
+  `acquire_transcript` is a no-op and `ContentItem`s have to be created by
+  hand. `apps/connectors/chains.py` already declares the fallback ladder as
+  data, so that task becomes a walk over `DEFAULT_CHAINS` rather than new
+  branching.
+- **Clustering and signal detection.** Deferred deliberately: Anthropic has no
+  embeddings endpoint, so pgvector needs a second provider decision that is not
+  worth making before there is enough real content for clustering to mean
+  anything. `Signal.domain_score` is still a hand-written integer.
+- **No API keys anywhere.** The whole AI layer is exercised against a fake
+  transport (`apps/enrichment/tests/fakes.py`) — no key, no network, nothing
+  spent, and the cap and refusal paths become testable, which they would not be
+  against a live API. Not one line of it has made a real call.
 - **`conftest.py` fixtures still raise `NotImplementedError`,** so the tenancy
   suites read as specifications and do not yet assert. `scripts/smoke-portal-api.sh`
   covers the same ground over HTTP in the meantime.

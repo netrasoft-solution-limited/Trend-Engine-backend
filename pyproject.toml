@@ -20,6 +20,14 @@ dependencies = [
     "django-storages[s3]>=1.14",
     "gunicorn>=22.0",
     "httpx>=0.27",
+    # The model layer. `apps/enrichment/llm/client.py` imports it lazily, so
+    # migrations and the portal run without it — but nothing can be enriched
+    # until it is installed.
+    "anthropic>=0.40",
+    # Structured extraction is validated against Pydantic models server-side
+    # (`messages.parse`), which is what keeps malformed claims out of the
+    # database rather than parsing JSON and hoping.
+    "pydantic>=2.7",
 ]
 
 [build-system]

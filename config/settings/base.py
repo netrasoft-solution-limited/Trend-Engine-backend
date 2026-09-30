@@ -241,6 +241,32 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
+# ── The model layer (Arch §10.3) ────────────────────────────────────────────
+# `LLM_API_KEY` and `LLM_MONTHLY_CAP_USD` have been in deploy/.env.example
+# since the skeleton without anything reading them. These are the settings that
+# read them.
+#
+# With no LLM_API_KEY the SDK falls back to ANTHROPIC_API_KEY, then
+# ANTHROPIC_AUTH_TOKEN, then an `ant auth login` profile — so a developer who
+# has logged in needs no key here at all.
+LLM_API_KEY = env("LLM_API_KEY", "")
+
+#: Arch §10.2's hard cap, enforced BEFORE each call, not reconciled after.
+#: Zero disables the ceiling and logs a warning — it does not mean "free".
+LLM_MONTHLY_CAP_USD = env("LLM_MONTHLY_CAP_USD", "0")
+
+#: A single call this expensive is a bug — a runaway prompt, a document pasted
+#: into a classifier. Refused before it is made.
+LLM_PER_CALL_MAX_USD = env("LLM_PER_CALL_MAX_USD", "1.00")
+
+# Tiered by task, per Arch §10.3: "Cheap tier for relevance classification
+# (high volume, low stakes); stronger tier only for client-facing drafting."
+# Overridable so a tier can be re-pointed when a price or capability changes,
+# without a deploy.
+LLM_MODEL_GATE = env("LLM_MODEL_GATE", "claude-haiku-4-5")
+LLM_MODEL_EXTRACTION = env("LLM_MODEL_EXTRACTION", "claude-sonnet-5-5")
+LLM_MODEL_DRAFTING = env("LLM_MODEL_DRAFTING", "claude-opus-5-5")
+
 # ── Logging ─────────────────────────────────────────────────────────────────
 # Arch §12: no client-private content in logs or error trackers.
 # Arch §13: a TenantScopeError in production is a P1 — route it loudly.

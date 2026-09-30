@@ -155,7 +155,12 @@ class CostEvent(models.Model):
     source_id = models.CharField(max_length=64, blank=True)
     run_id = models.CharField(max_length=64, blank=True)
     units = models.JSONField(default=dict)
-    estimated_usd = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    #: Six places, not four. A relevance-gate call costs about $0.00195 and the
+    #: cheapest ones are an order of magnitude below that — at four places they
+    #: round to zero, so the ledger would read empty while real money was being
+    #: spent. Since `apps.enrichment.llm.costs` reads this column to enforce the
+    #: cap (Arch §10.2), a rounding error here is a cap that never fires.
+    estimated_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
 
     class Meta:
         ordering = ("-at",)

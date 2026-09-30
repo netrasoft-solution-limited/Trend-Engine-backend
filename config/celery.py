@@ -54,27 +54,23 @@ app.conf.task_annotations = {
 }
 
 app.conf.beat_schedule = {
-    "poll-due-sources": {
-        "task": "apps.ingestion.tasks.poll_due_sources",
-        "schedule": crontab(minute="*/15"),
-    },
-    "poll-deletions": {
-        # Platform deletion and retention obligations, per connector (PRD §7.2).
-        "task": "apps.evidence.tasks.poll_deletions",
-        "schedule": crontab(hour="3", minute="30"),
-    },
-    "refresh-cost-ledger": {
-        "task": "apps.operations.tasks.refresh_cost_ledger",
-        "schedule": crontab(minute="0"),
-    },
-    "nightly-backup": {
-        "task": "apps.operations.tasks.nightly_backup",
-        "schedule": crontab(hour="3", minute="0"),
-    },
-    "weekly-restore-test": {
-        # Arch §11.3: "an untested backup is not a backup." This is an explicit
-        # acceptance criterion, not a nice-to-have.
-        "task": "apps.operations.tasks.restore_test",
-        "schedule": crontab(day_of_week="sun", hour="4", minute="0"),
+    # Screen whatever the last pass could not afford or could not reach. The
+    # gate leaves those PENDING rather than rejecting them, so this is what
+    # picks them back up.
+    "assess-pending-relevance": {
+        "task": "apps.enrichment.tasks.assess_pending",
+        "schedule": crontab(minute="*/30"),
     },
 }
+
+# ── Scheduled but not yet implemented ───────────────────────────────────────
+# These were on the beat schedule pointing at tasks that do not exist, so beat
+# dispatched messages no worker could resolve — a silent failure that looks
+# exactly like a quiet system. They are listed here rather than scheduled, and
+# each moves back above when its task is written:
+#
+#   apps.ingestion.tasks.poll_due_sources      every 15 min   (needs connectors)
+#   apps.evidence.tasks.poll_deletions         daily 03:30    (PRD §7.2)
+#   apps.operations.tasks.refresh_cost_ledger  hourly
+#   apps.operations.tasks.nightly_backup       daily 03:00    (scripts/backup.sh)
+#   apps.operations.tasks.restore_test         weekly         (Arch §11.3)
