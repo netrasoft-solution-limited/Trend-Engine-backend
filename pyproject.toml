@@ -67,6 +67,9 @@ markers = [
     # they ran, rather than trusting that a green suite included them.
     "tenancy: scope leakage, unscoped access, cross-plane escalation",
     "publication: the gate is the only door",
+    # Opts a test out of the network block in conftest.py. Nothing uses it —
+    # it exists so that the block is a choice rather than a wall.
+    "live: makes real outbound HTTP calls",
 ]
 
 [tool.ruff]

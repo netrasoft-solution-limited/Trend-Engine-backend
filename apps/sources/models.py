@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
@@ -44,6 +45,29 @@ class Source(models.Model):
     name = models.CharField(max_length=200, unique=True)
     route = models.CharField(max_length=16, choices=Route.choices)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+
+    #: What the connector needs in order to find this source's items — an RSS
+    #: URL, a series name, a set of search queries, a channel. It is a JSON
+    #: object rather than columns because each route needs something different,
+    #: and a column per connector would mean a migration every time a vendor is
+    #: added. `apps.evidence.collection` is the only place its keys are read.
+    #:
+    #:     {"rss_url": "https://…"}        podcast, preferred — exact
+    #:     {"series_name": "The Drive"}    podcast, fallback — Taddy matches exactly
+    #:     {"queries": ["magnesium"]}      youtube — Apify search
+    #:     {"urls": ["https://…"]}         youtube — specific videos
+    config = models.JSONField(default=dict, blank=True)
+
+    #: How often this source is worth asking. Podcasts publish weekly; a search
+    #: query is worth running daily. Zero means "never automatically" — a
+    #: source polled only by hand, which is how a one-off import behaves.
+    poll_interval_minutes = models.PositiveIntegerField(default=60 * 24)
+
+    #: When it was last ATTEMPTED. Distinct from `last_success_at` on purpose:
+    #: due-ness must move forward even when a poll fails, or a source that is
+    #: persistently broken gets retried on every single beat tick while healthy
+    #: ones wait their turn.
+    last_polled_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
 
     #: PRD §7.2: a source cannot collect without an access basis. Nullable at
@@ -72,6 +96,35 @@ class Source(models.Model):
         than at its next construction.
         """
         return self.status != self.Status.FAILED and self.policy is not None and self.policy.is_live
+
+    @property
+    def is_due(self) -> bool:
+        """Whether the scheduler should poll this source now.
+
+        `can_collect` is checked first and separately: a source without a live
+        policy is not "not yet due", it is not collectable at all, and the two
+        should not be confused when someone asks why nothing is arriving.
+        """
+        if not self.can_collect or not self.poll_interval_minutes:
+            return False
+        if self.last_polled_at is None:
+            return True
+        due_at = self.last_polled_at + timedelta(minutes=self.poll_interval_minutes)
+        return timezone.now() >= due_at
+
+    def mark_polled(self, *, succeeded: bool) -> None:
+        """Record the attempt, and the success separately.
+
+        Both are written even on failure, so that a broken source falls to the
+        back of the queue rather than being retried on every tick.
+        """
+        now = timezone.now()
+        self.last_polled_at = now
+        fields = ["last_polled_at"]
+        if succeeded:
+            self.last_success_at = now
+            fields.append("last_success_at")
+        self.save(update_fields=fields)
 
 
 class AcquisitionProvider(models.Model):

@@ -35,6 +35,11 @@ app.conf.task_default_queue = "default"
 app.conf.task_routes = {
     "apps.ingestion.tasks.*": {"queue": "ingest"},
     "apps.connectors.tasks.*": {"queue": "ingest"},
+    # Collection — polling feeds and normalising what comes back. I/O-bound and
+    # slow, never expensive, so it belongs on the wide queue with the rest of
+    # acquisition rather than on the narrow cost-capped one. Without this line
+    # these fall through to `default`, where they would sit behind exports.
+    "apps.evidence.tasks.*": {"queue": "ingest"},
     "apps.enrichment.tasks.*": {"queue": "enrich"},
     "apps.outputs.tasks.*": {"queue": "default"},
     "apps.publication.tasks.*": {"queue": "default"},
@@ -54,6 +59,17 @@ app.conf.task_annotations = {
 }
 
 app.conf.beat_schedule = {
+    # The front of the pipeline. This only DISPATCHES — per-source polling is a
+    # task each, so one slow vendor cannot delay every source behind it and one
+    # exception cannot lose the whole pass.
+    #
+    # Every 15 minutes is the scheduler's resolution, not the poll rate: each
+    # source carries its own `poll_interval_minutes`, and this tick simply asks
+    # which have elapsed. A weekly podcast is still polled weekly.
+    "poll-due-sources": {
+        "task": "apps.evidence.tasks.poll_due_sources",
+        "schedule": crontab(minute="*/15"),
+    },
     # Screen whatever the last pass could not afford or could not reach. The
     # gate leaves those PENDING rather than rejecting them, so this is what
     # picks them back up.
@@ -69,7 +85,6 @@ app.conf.beat_schedule = {
 # exactly like a quiet system. They are listed here rather than scheduled, and
 # each moves back above when its task is written:
 #
-#   apps.ingestion.tasks.poll_due_sources      every 15 min   (needs connectors)
 #   apps.evidence.tasks.poll_deletions         daily 03:30    (PRD §7.2)
 #   apps.operations.tasks.refresh_cost_ledger  hourly
 #   apps.operations.tasks.nightly_backup       daily 03:00    (scripts/backup.sh)

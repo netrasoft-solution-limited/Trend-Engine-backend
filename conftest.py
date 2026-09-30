@@ -26,6 +26,38 @@ from apps.tenancy.managers import TenantScopedModel
 _counter = itertools.count(1)
 
 
+@pytest.fixture(autouse=True)
+def no_real_http(monkeypatch, request):
+    """Refuse outbound HTTP from the test suite.
+
+    Not paranoia — it already happened. A test patched `collection.collect`
+    while the task under test had bound the name at import, so the patch missed
+    and the suite made live Taddy calls. It passed nothing useful, took forty
+    seconds, and on a metered vendor it would have spent money in CI on every
+    push.
+
+    Blocked at the TRANSPORT, so the many tests that drive an
+    `httpx.MockTransport` are unaffected — that is a different class and never
+    reaches this one. A test that genuinely wants the network marks itself
+    `@pytest.mark.live`; nothing in the suite does today.
+    """
+    if request.node.get_closest_marker("live"):
+        return
+
+    import httpx
+
+    def refuse(self, request_, *args, **kwargs):
+        raise RuntimeError(
+            f"A test tried to reach {request_.url.host} over the network. "
+            f"Tests must drive an httpx.MockTransport instead — a live call "
+            f"here is slow, flaky, and on a metered vendor it costs money on "
+            f"every CI run. If this is deliberate, mark the test @pytest.mark.live."
+        )
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", refuse)
+
+
 # ── Tenants ─────────────────────────────────────────────────────────────────
 
 

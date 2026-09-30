@@ -40,6 +40,11 @@ class IngestResult:
     transcripts: int = 0
     metadata_only: int = 0
     items: list[ContentItem] = field(default_factory=list)
+    #: The NEW ones, specifically. Kept as its own list rather than left to be
+    #: sliced off `items` by count: rows arrive interleaved, so the created
+    #: ones are not a prefix, and a caller that assumes they are will gate the
+    #: wrong items — silently, since both lists hold ContentItems.
+    created_items: list[ContentItem] = field(default_factory=list)
 
     def __str__(self) -> str:
         return (
@@ -100,6 +105,7 @@ def ingest_rows(
 
         result.items.append(item)
         if created:
+            result.created_items.append(item)
             result.created += 1
             result.transcripts += 1 if text else 0
             result.metadata_only += 0 if text else 1
