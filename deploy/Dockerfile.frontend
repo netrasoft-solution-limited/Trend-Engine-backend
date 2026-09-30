@@ -4,8 +4,11 @@
 # JSON API; putting a Node server in front of static files would add a process
 # to supervise, patch and restart for nothing. Caddy already serves files.
 #
-# Build context is the REPOSITORY ROOT, so that this can see ../frontend from
-# deploy/ — the same context the Django image uses.
+# Build context is the PARENT OF BOTH REPOSITORIES, because the portal lives in
+# its own repository (Trend-Engine) beside the backend. See the comment on the
+# `frontend` service in docker-compose.yml for the layout this expects. The
+# Django image uses a different context — the backend root — which is why the
+# two services do not share one.
 
 FROM node:22-alpine AS build
 

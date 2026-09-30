@@ -53,8 +53,18 @@ services:
   # Caddy already serves files.
   frontend:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.frontend
+      # The PARENT of both repos, not the backend root: the portal lives in a
+      # separate repository (Trend-Engine) beside this one, so the build needs
+      # a context that can see both. Required layout on disk:
+      #
+      #     trend-engine/
+      #       backend/    this repository
+      #       frontend/   the Trend-Engine repository
+      #
+      # With `context: ..` the build looked for backend/frontend/ and failed on
+      # the first COPY.
+      context: ../..
+      dockerfile: backend/deploy/Dockerfile.frontend
     volumes:
       - web:/srv/web
     restart: "no"
