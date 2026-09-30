@@ -1,0 +1,88 @@
+{% comment %}
+Operator plane shell. Deliberately plain and dependency-free: the operator UI
+is a working tool, not a product surface, and a screen that needs a build step
+is a screen that cannot be fixed from an SSH session at 2am.
+{% endcomment %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Operations{% endblock %} · Trend Engine</title>
+  <style>
+    :root {
+      --bg: #fbfbfa; --panel: #fff; --ink: #1c1b19; --muted: #6b6864;
+      --line: #e5e2dd; --accent: #1f513f; --warn: #b45309; --bad: #a32b20;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #17181a; --panel: #1f2023; --ink: #eceae6; --muted: #9a968f;
+        --line: #32343a; --accent: #7fb69b; --warn: #e0a34a; --bad: #e08376;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line); padding: 14px 16px;
+      display: flex; gap: 16px; align-items: baseline;
+    }
+    header b { font-weight: 650; }
+    header span { color: var(--muted); font-size: 13px; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+    .lede { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; padding: 18px; margin-bottom: 14px;
+    }
+    .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .name { font-weight: 620; }
+    .state { font-size: 13px; }
+    .state.stored { color: var(--accent); }
+    .state.env { color: var(--warn); }
+    .state.missing { color: var(--muted); }
+    .state.unreadable { color: var(--bad); font-weight: 600; }
+    code {
+      font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: color-mix(in srgb, var(--ink) 7%, transparent);
+      padding: 1px 5px; border-radius: 4px;
+    }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+    input[type=password], input[type=text] {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+      border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit;
+    }
+    .actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+    button {
+      font: inherit; padding: 8px 14px; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--accent); background: var(--accent); color: var(--bg);
+    }
+    button.secondary { background: transparent; color: var(--muted); border-color: var(--line); }
+    .note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    ul.messages { list-style: none; padding: 0; margin: 0 0 18px; }
+    ul.messages li {
+      padding: 10px 12px; border-radius: 8px; margin-bottom: 8px;
+      border: 1px solid var(--line); background: var(--panel); font-size: 14px;
+    }
+    ul.messages li.error { border-color: var(--bad); color: var(--bad); }
+    ul.messages li.warning { border-color: var(--warn); color: var(--warn); }
+    @media (max-width: 520px) { main { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <b>Trend Engine</b>
+    <span>Operations</span>
+  </header>
+  <main>
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

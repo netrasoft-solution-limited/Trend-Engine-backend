@@ -34,6 +34,17 @@ ALLOWED_HOSTS = [h for h in env("DJANGO_ALLOWED_HOSTS", "").split(",") if h]
 # Ordered by layer, lowest first. The ordering is documentation: dependencies
 # point downward only, and import-linter enforces it (Arch §4).
 
+# `django.contrib.admin` IS DELIBERATELY ABSENT. Its `LogEntry` carries a
+# foreign key to `settings.AUTH_USER_MODEL`, which Django records in the
+# migration as a swappable dependency — so the same `django_admin_log.user_id`
+# column points at `operations_operatoruser` in the ops process and
+# `portal_orguser` in the portal process. That is precisely the silent join
+# across two identity tables that `apps/operations/models.py` forbids, and it
+# is NOT caught by the dual `makemigrations --check`, because a swappable
+# dependency is settings-dependent by design and reports no changes under
+# either. Provider configuration has its own operator screen instead; see
+# `apps/sources/views.py`. `tests/test_migrations_are_settings_independent.py`
+# now fails if anything reintroduces such a dependency.
 DJANGO_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -266,6 +277,19 @@ LLM_PER_CALL_MAX_USD = env("LLM_PER_CALL_MAX_USD", "1.00")
 LLM_MODEL_GATE = env("LLM_MODEL_GATE", "claude-haiku-4-5")
 LLM_MODEL_EXTRACTION = env("LLM_MODEL_EXTRACTION", "claude-sonnet-5-5")
 LLM_MODEL_DRAFTING = env("LLM_MODEL_DRAFTING", "claude-opus-5-5")
+
+# ── Provider credentials (Arch §12) ─────────────────────────────────────────
+# Vendor keys live in the database, encrypted, so an operator can rotate one
+# without a deploy. This is the key that encrypts them.
+#
+# Left unset it is DERIVED from SECRET_KEY, which keeps development and CI
+# working with no extra configuration. The consequence is real and worth
+# stating: rotating SECRET_KEY then makes every stored credential unreadable
+# and they have to be re-entered. Production sets this explicitly so the two
+# rotate independently.
+#
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+CREDENTIALS_ENCRYPTION_KEY = env("CREDENTIALS_ENCRYPTION_KEY", "")
 
 # ── Logging ─────────────────────────────────────────────────────────────────
 # Arch §12: no client-private content in logs or error trackers.

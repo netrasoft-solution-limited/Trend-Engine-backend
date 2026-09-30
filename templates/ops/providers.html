@@ -1,0 +1,74 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Provider credentials. The inputs are always empty and no stored secret is ever
+rendered — the hint below each provider is the last four characters only.
+{% endcomment %}
+{% block title %}Provider credentials{% endblock %}
+
+{% block content %}
+  <h1>Provider credentials</h1>
+  <p class="lede">
+    Vendor keys are stored encrypted and take effect on the next run — changing
+    one here needs no deploy. Entered values are never displayed back.
+  </p>
+
+  {% for provider in providers %}
+    <div class="card">
+      <div class="row">
+        <span class="name">{{ provider.obj.name }}</span>
+        {% if provider.obj.has_credential %}
+          <span class="state stored">stored · {{ provider.obj.credential_hint }}</span>
+        {% else %}
+          <span class="state env">
+            not stored — falls back to <code>{{ provider.primary_env_var }}</code>
+          </span>
+        {% endif %}
+      </div>
+
+      {% if provider.obj.credential_updated_at %}
+        <p class="note">
+          Last changed {{ provider.obj.credential_updated_at|date:"j M Y, H:i" }}
+          by {{ provider.obj.credential_updated_by_label }}.
+        </p>
+      {% endif %}
+
+      <form method="post"
+            action="{% url 'ops-provider-credentials' provider.obj.pk %}"
+            autocomplete="off">
+        {% csrf_token %}
+        {% for input in provider.inputs %}
+          <label for="{{ provider.obj.pk }}-{{ input.name }}">
+            {{ input.name }}
+            <span style="opacity:.75">· falls back to <code>{{ input.env_var }}</code></span>
+          </label>
+          <input type="password"
+                 id="{{ provider.obj.pk }}-{{ input.name }}"
+                 name="{{ input.name }}"
+                 autocomplete="new-password"
+                 placeholder="leave blank to keep the current value">
+        {% endfor %}
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          {% if provider.obj.has_credential %}
+            <button type="submit" name="clear" value="1" class="secondary"
+                    formnovalidate>Remove stored credentials</button>
+          {% endif %}
+        </div>
+      </form>
+
+      <p class="note">
+        Caps: ${{ provider.obj.monthly_cap_usd }}/month, ${{ provider.obj.per_run_max_usd }}/run.
+        {% if provider.obj.paused_at %}<b>Paused {{ provider.obj.paused_at|date:"j M" }}.</b>{% endif %}
+      </p>
+    </div>
+  {% empty %}
+    <div class="card">
+      <p>No acquisition providers are registered yet.</p>
+      <p class="note">
+        A provider is created the first time a connector runs against it, or by
+        <code>manage.py set_provider_credential</code>.
+      </p>
+    </div>
+  {% endfor %}
+{% endblock %}

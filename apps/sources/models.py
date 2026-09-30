@@ -15,7 +15,15 @@ to construct without one — until now there was no model that could supply it.
 """
 from __future__ import annotations
 
+import logging
+import os
+
 from django.db import models
+from django.utils import timezone
+
+from . import credentials
+
+logger = logging.getLogger(__name__)
 
 
 class Source(models.Model):
@@ -93,11 +101,89 @@ class AcquisitionProvider(models.Model):
     #: Auto-paused at 100% of cap. An operator clears this deliberately.
     paused_at = models.DateTimeField(null=True, blank=True)
 
+    # ── Credentials (operator-managed) ──────────────────────────────────────
+    #: A Fernet-encrypted JSON object of named secrets — `{"api_key": "…"}`, or
+    #: `{"api_key": "…", "user_id": "…"}` for a provider like Taddy that needs
+    #: two. Never readable from the admin; see `apps.sources.credentials` for
+    #: what this does and does not protect against.
+    credential_ciphertext = models.TextField(blank=True)
+    #: `api_key ····3f2a` — enough to confirm WHICH key is loaded without ever
+    #: displaying one. Stored rather than derived so that reading the list does
+    #: not require decrypting every row.
+    credential_hint = models.CharField(max_length=200, blank=True)
+    credential_updated_at = models.DateTimeField(null=True, blank=True)
+    credential_updated_by_label = models.CharField(max_length=254, blank=True)
+
     class Meta:
         ordering = ("name",)
 
     def __str__(self) -> str:
         return self.name
+
+    # ── Reading and writing credentials ─────────────────────────────────────
+
+    @property
+    def has_credential(self) -> bool:
+        return bool(self.credential_ciphertext)
+
+    def set_credentials(self, values: dict[str, str], *, actor_label: str) -> None:
+        """Replace this provider's secrets. Does not save; the caller does.
+
+        Replace, not merge: a partial update is how a stale second value
+        survives a rotation and authentication keeps failing for a reason
+        nobody can see.
+        """
+        cleaned = {k: v.strip() for k, v in values.items() if v and v.strip()}
+        self.credential_ciphertext = credentials.encrypt(cleaned) if cleaned else ""
+        self.credential_hint = credentials.hint(cleaned)
+        self.credential_updated_at = timezone.now()
+        self.credential_updated_by_label = actor_label
+
+    def credential(self, name: str = "api_key", *, env_var: str = "") -> str:
+        """One secret, from the database if set and the environment if not.
+
+        DATABASE FIRST, because operator-managed rotation is the point of this
+        field — an environment variable that silently won over a freshly
+        rotated key would make the admin screen a lie.
+
+        The environment remains a fallback so that a fresh checkout, CI and the
+        first deploy all work before anyone has opened the admin. `env_var`
+        defaults to the conventional name for this provider.
+        """
+        if self.credential_ciphertext:
+            stored = credentials.decrypt(self.credential_ciphertext).get(name, "")
+            if stored:
+                return stored
+
+        variable = env_var or self.default_env_var(name)
+        value = os.environ.get(variable, "")
+        if value:
+            logger.info(
+                "%s credential '%s' came from %s, not from the database. "
+                "Set it in the operator admin so it can be rotated without a deploy.",
+                self.name, name, variable,
+            )
+        return value
+
+    def default_env_var(self, name: str = "api_key") -> str:
+        """The conventional environment variable for this provider's secret.
+
+        `apify` + `api_key` → `APIFY_API_KEY`; `taddy` + `user_id` →
+        `TADDY_USER_ID`. Overridden below where an existing name differs, so
+        that adding this model does not break a working deployment.
+        """
+        override = _ENV_OVERRIDES.get((self.kind, name))
+        return override or f"{self.kind.upper()}_{name.upper()}"
+
+
+#: Where the conventional name would not match the variable already in use.
+#: Renaming those would be a silent breakage on the next deploy for no gain.
+_ENV_OVERRIDES: dict[tuple[str, str], str] = {
+    ("apify", "api_key"): "APIFY_TOKEN",
+    ("assemblyai", "api_key"): "ASSEMBLYAI_API_KEY",
+    ("taddy", "api_key"): "TADDY_API_KEY",
+    ("taddy", "user_id"): "TADDY_USER_ID",
+}
 
 
 class ProviderPolicyVersion(models.Model):

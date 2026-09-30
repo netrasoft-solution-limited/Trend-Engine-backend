@@ -20,6 +20,10 @@ dependencies = [
     "django-storages[s3]>=1.14",
     "gunicorn>=22.0",
     "httpx>=0.27",
+    # Vendor credentials are stored encrypted so an operator can rotate them
+    # without a deploy — see apps/sources/credentials.py for what that does
+    # and does not protect against.
+    "cryptography>=43.0",
     # The model layer. `apps/enrichment/llm/client.py` imports it lazily, so
     # migrations and the portal run without it — but nothing can be enriched
     # until it is installed.
