@@ -1,0 +1,23 @@
+{% extends "ops/base.html" %}
+{% block title %}Recovery codes{% endblock %}
+{% block content %}
+  <h1>Save your recovery codes</h1>
+  <p class="lede">
+    You are signed in. These are stored hashed, so this is the only time they
+    can be shown — each one works once, and they are the only way back if you
+    lose your authenticator.
+  </p>
+
+  <div class="card">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+      {% for code in codes %}
+        <code style="user-select:all;font-size:15px;padding:7px 9px;text-align:center">{{ code }}</code>
+      {% endfor %}
+    </div>
+    <p class="note">
+      Put them in a password manager, not in a browser tab. Without them, a
+      lost phone means an admin has to reset your second factor over SSH.
+    </p>
+    <div class="actions"><a href="{{ home }}"><button type="button">I have saved them</button></a></div>
+  </div>
+{% endblock %}

@@ -26,6 +26,9 @@ dependencies = [
     "cryptography>=43.0",
     # PRD §7.1's second factor for operators (apps/operations/totp.py).
     "pyotp>=2.9",
+    # Renders the enrolment QR as inline SVG from the raw module matrix — pure
+    # Python, no image library, nothing to serve from the static volume.
+    "qrcode>=7.4",
     # The model layer. `apps/enrichment/llm/client.py` imports it lazily, so
     # migrations and the portal run without it — but nothing can be enriched
     # until it is installed.

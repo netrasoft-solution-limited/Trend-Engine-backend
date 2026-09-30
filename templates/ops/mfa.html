@@ -1,0 +1,24 @@
+{% extends "ops/base.html" %}
+{% block title %}Second factor{% endblock %}
+{% block content %}
+  <h1>Enter your code</h1>
+  <p class="lede">Signing in as {{ email }}. Open your authenticator app.</p>
+
+  {% if error %}<div class="card" style="border-color:var(--bad);color:var(--bad)">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <form method="post" action="{% url 'ops-mfa' %}">
+      {% csrf_token %}
+      <label for="code">6-digit code, or a recovery code</label>
+      <input type="text" id="code" name="code" required autofocus
+             inputmode="text" autocomplete="one-time-code"
+             spellcheck="false" placeholder="123456">
+      <div class="actions"><button type="submit">Sign in</button></div>
+    </form>
+    <p class="note">
+      Lost your authenticator? Use one of the recovery codes you were given —
+      each works once. If none are left, an admin can reset the factor with
+      <code>manage.py operator_mfa &lt;email&gt; --reset</code>.
+    </p>
+  </div>
+{% endblock %}

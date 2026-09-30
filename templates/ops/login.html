@@ -1,0 +1,23 @@
+{% extends "ops/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+  <h1>Operator sign in</h1>
+  <p class="lede">Pure Play staff only. Every sign-in needs a second factor.</p>
+
+  {% if error %}<div class="card" style="border-color:var(--bad);color:var(--bad)">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <form method="post" action="{% url 'ops-login' %}">
+      {% csrf_token %}
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" value="{{ email|default:'' }}"
+             autocomplete="username" required autofocus>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password"
+             autocomplete="current-password" required>
+
+      <div class="actions"><button type="submit">Continue</button></div>
+    </form>
+  </div>
+{% endblock %}

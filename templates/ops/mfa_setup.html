@@ -1,0 +1,35 @@
+{% extends "ops/base.html" %}
+{% block title %}Set up your second factor{% endblock %}
+{% block content %}
+  <h1>Set up your authenticator</h1>
+  <p class="lede">
+    {{ email }} has no second factor yet. Scan this once, then enter the code
+    it shows to finish signing in.
+  </p>
+
+  {% if error %}<div class="card" style="border-color:var(--bad);color:var(--bad)">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+      <div style="line-height:0">{{ qr|safe }}</div>
+      <div style="flex:1;min-width:230px">
+        <p class="note" style="margin-top:0">
+          Cannot scan? Enter this key by hand:
+        </p>
+        <p><code style="user-select:all;font-size:14px">{{ secret }}</code></p>
+        <p class="note">
+          On a phone you can also <a href="{{ uri }}">open it directly</a>.
+        </p>
+      </div>
+    </div>
+
+    <form method="post" action="{% url 'ops-mfa-setup' %}">
+      {% csrf_token %}
+      <label for="code">Code from the app</label>
+      <input type="text" id="code" name="code" required autofocus
+             inputmode="numeric" autocomplete="one-time-code"
+             spellcheck="false" placeholder="123456">
+      <div class="actions"><button type="submit">Confirm and sign in</button></div>
+    </form>
+  </div>
+{% endblock %}
