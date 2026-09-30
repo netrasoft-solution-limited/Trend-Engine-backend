@@ -4,19 +4,29 @@ A pure function of a mapping rather than module-level `os.environ` reads, so
 the parsing can be tested without re-importing the settings. `base.py` calls
 it once with `os.environ`.
 
-PRD §13 leaves the transactional email provider undecided, so nothing here
-names a vendor: any provider that speaks SMTP is configured with these
-variables. Defaults are Django's own, except the backend, which is the console
-backend until someone chooses otherwise — see the note in `base.py`.
+PRD §13's undecided provider is now Resend, over its HTTP API rather than
+SMTP — see `config/email.py` for why. The SMTP variables remain, because
+nothing here is Resend-specific: setting EMAIL_HOST and friends still works
+for any provider, and the console backend is still the default when neither is
+configured.
+
+Backend selection, in order: an explicit DJANGO_EMAIL_BACKEND wins; then a
+RESEND_API_KEY picks the Resend backend; then an EMAIL_HOST picks Django's
+SMTP backend; otherwise the console. That order means a developer can override
+anything, and a deploy that sets only the API key does the right thing rather
+than printing mail to a log nobody reads.
 
 A variable that is present but blank counts as unset. A dashboard field left
 empty should behave like a field never added, not like an empty host.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 CONSOLE_EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+SMTP_EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+RESEND_EMAIL_BACKEND = "config.email.ResendBackend"
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -55,7 +65,7 @@ def email_settings(environ: Mapping[str, str]) -> dict[str, Any]:
     on a parse failure are the boolean and the port.
     """
     return {
-        "EMAIL_BACKEND": _text(environ, "DJANGO_EMAIL_BACKEND", CONSOLE_EMAIL_BACKEND),
+        "EMAIL_BACKEND": _backend(environ),
         "EMAIL_HOST": _text(environ, "EMAIL_HOST", "localhost"),
         "EMAIL_PORT": _int(environ, "EMAIL_PORT", 25),
         "EMAIL_HOST_USER": _text(environ, "EMAIL_HOST_USER", ""),
@@ -70,4 +80,24 @@ def email_settings(environ: Mapping[str, str]) -> dict[str, Any]:
         "DEFAULT_FROM_EMAIL": _text(
             environ, "DEFAULT_FROM_EMAIL", "Trend Engine <no-reply@localhost>"
         ),
+        # Not a Django setting — `config.email.ResendBackend` reads it off
+        # settings. Kept here so every email decision is made in one tested
+        # function rather than half here and half in base.py.
+        "RESEND_API_KEY": environ.get("RESEND_API_KEY", "").strip(),
     }
+
+
+def _backend(environ: Mapping[str, str]) -> str:
+    """Which backend, from what is actually configured.
+
+    An explicit choice always wins — a developer pointing this at the console
+    backend while a key sits in their environment means it.
+    """
+    explicit = _text(environ, "DJANGO_EMAIL_BACKEND", "")
+    if explicit:
+        return explicit
+    if environ.get("RESEND_API_KEY", "").strip():
+        return RESEND_EMAIL_BACKEND
+    if environ.get("EMAIL_HOST", "").strip():
+        return SMTP_EMAIL_BACKEND
+    return CONSOLE_EMAIL_BACKEND

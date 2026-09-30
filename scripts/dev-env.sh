@@ -51,3 +51,14 @@ export DJANGO_INSECURE_COOKIES=1
 # "no credentials" error rather than a confusing failure deep in a request.
 [ -f "$(dirname "${BASH_SOURCE[0]:-scripts/dev-env.sh}")/secrets.local.sh" ] \
   && source "$(dirname "${BASH_SOURCE[0]:-scripts/dev-env.sh}")/secrets.local.sh"
+
+# Local development sends NOTHING. With RESEND_API_KEY present in
+# secrets.local.sh the settings would otherwise select the live Resend backend,
+# and a stray `send_mail` in a shell or a management command would deliver real
+# email to a real person. An explicit backend wins over the key on purpose
+# (config/settings/mail.py) — this is that escape hatch being used.
+#
+# To exercise the real provider deliberately, unset this for one command:
+#   env -u DJANGO_EMAIL_BACKEND .venv/bin/python ...
+export DJANGO_EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend"
+export DEFAULT_FROM_EMAIL="Trend Engine <no-reply@localhost>"

@@ -13,7 +13,11 @@ import pytest
 from django.conf import settings as django_settings
 
 from apps.portal.notifications import warn_if_emails_go_to_the_log
-from config.settings.mail import CONSOLE_EMAIL_BACKEND, email_settings
+from config.settings.mail import (
+    CONSOLE_EMAIL_BACKEND,
+    RESEND_EMAIL_BACKEND,
+    email_settings,
+)
 
 SMTP = "django.core.mail.backends.smtp.EmailBackend"
 
@@ -34,6 +38,7 @@ def test_defaults_when_nothing_is_set():
         "EMAIL_USE_TLS": False,
         "EMAIL_TIMEOUT": 10,
         "DEFAULT_FROM_EMAIL": "Trend Engine <no-reply@localhost>",
+        "RESEND_API_KEY": "",
     }
 
 
@@ -58,7 +63,48 @@ def test_values_from_the_environment():
         "EMAIL_USE_TLS": True,
         "EMAIL_TIMEOUT": 5,
         "DEFAULT_FROM_EMAIL": "Example <no-reply@example.test>",
+        "RESEND_API_KEY": "",
     }
+
+
+# ── Which backend, from what is configured ──────────────────────────────────
+
+
+def test_a_resend_key_alone_selects_the_resend_backend():
+    """A deploy that sets only the API key should send mail, not print it to a
+    log nobody reads."""
+    settings = email_settings({"RESEND_API_KEY": "re_fake"})
+
+    assert settings["EMAIL_BACKEND"] == RESEND_EMAIL_BACKEND
+    assert settings["RESEND_API_KEY"] == "re_fake"
+
+
+def test_an_smtp_host_alone_selects_the_smtp_backend():
+    """Nothing here is Resend-specific; any provider still works."""
+    assert email_settings({"EMAIL_HOST": "smtp.example.test"})["EMAIL_BACKEND"] == SMTP
+
+
+def test_an_explicit_backend_beats_both():
+    """A developer pointing this at the console while a key sits in their
+    environment means it."""
+    settings = email_settings(
+        {"DJANGO_EMAIL_BACKEND": CONSOLE_EMAIL_BACKEND, "RESEND_API_KEY": "re_fake"}
+    )
+
+    assert settings["EMAIL_BACKEND"] == CONSOLE_EMAIL_BACKEND
+
+
+def test_resend_wins_over_smtp_when_both_are_present():
+    """Ambiguous configuration has to resolve the same way every time."""
+    settings = email_settings(
+        {"RESEND_API_KEY": "re_fake", "EMAIL_HOST": "smtp.example.test"}
+    )
+
+    assert settings["EMAIL_BACKEND"] == RESEND_EMAIL_BACKEND
+
+
+def test_nothing_configured_still_means_the_console():
+    assert email_settings({})["EMAIL_BACKEND"] == CONSOLE_EMAIL_BACKEND
 
 
 def test_blank_values_count_as_unset():
@@ -78,7 +124,8 @@ def test_blank_values_count_as_unset():
 
 
 def test_the_password_is_passed_through_verbatim():
-    assert email_settings({"EMAIL_HOST_PASSWORD": " fake pw "})["EMAIL_HOST_PASSWORD"] == " fake pw "
+    parsed = email_settings({"EMAIL_HOST_PASSWORD": " fake pw "})
+    assert parsed["EMAIL_HOST_PASSWORD"] == " fake pw "
 
 
 @pytest.mark.parametrize(
@@ -92,7 +139,10 @@ def test_use_tls_accepts_the_usual_spellings(raw, expected):
     assert email_settings({"EMAIL_USE_TLS": raw})["EMAIL_USE_TLS"] is expected
 
 
-@pytest.mark.parametrize(("name", "raw"), [("EMAIL_USE_TLS", "maybe"), ("EMAIL_PORT", "smtp"), ("EMAIL_TIMEOUT", "10s")])
+@pytest.mark.parametrize(
+    ("name", "raw"),
+    [("EMAIL_USE_TLS", "maybe"), ("EMAIL_PORT", "smtp"), ("EMAIL_TIMEOUT", "10s")],
+)
 def test_malformed_values_fail_naming_the_variable(name, raw):
     with pytest.raises(RuntimeError, match=name):
         email_settings({name: raw})

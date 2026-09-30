@@ -42,7 +42,7 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 LOGIN_URL = "/login"
 
-ALLOWED_HOSTS = [h for h in env("OPS_ALLOWED_HOSTS", "").split(",") if h] or ALLOWED_HOSTS
+ALLOWED_HOSTS = [h for h in env("OPS_ALLOWED_HOSTS", "").split(",") if h] or ALLOWED_HOSTS  # noqa: F405
 CSRF_TRUSTED_ORIGINS = [o for o in env("OPS_TRUSTED_ORIGINS", "").split(",") if o]
 
 MIDDLEWARE = COMMON_MIDDLEWARE + [

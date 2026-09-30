@@ -227,15 +227,21 @@ REST_FRAMEWORK = {
 }
 
 # ── Email ───────────────────────────────────────────────────────────────────
-# PRD §13 leaves the transactional email provider undecided; any SMTP provider
-# is configured from the environment (parsed in config/settings/mail.py).
+# Resend, over its HTTP API (config/email.py). Selected automatically when
+# RESEND_API_KEY is present; an explicit DJANGO_EMAIL_BACKEND still overrides,
+# and EMAIL_HOST still selects SMTP for any other provider. Parsed in
+# config/settings/mail.py.
 #
-# Unset, the backend is the CONSOLE backend in every environment, production
-# included. Nothing fails: every message is written to the process log instead
-# of being sent, and that includes the one-time links in invitations, password
-# resets and verification emails. `PortalConfig.ready()` logs a warning at
-# startup when this happens with DEBUG off. Set DJANGO_EMAIL_BACKEND and the
-# EMAIL_* variables before relying on email anywhere real.
+# With NOTHING configured the backend is the CONSOLE backend in every
+# environment, production included. Nothing fails: every message is written to
+# the process log instead of being sent, and that includes the one-time links
+# in invitations and password resets. `PortalConfig.ready()` logs a warning at
+# startup when this happens with DEBUG off.
+#
+# RESEND WILL ONLY SEND FROM A DOMAIN VERIFIED IN THE RESEND ACCOUNT, which is
+# a DNS task on that domain and not something a setting can arrange. Set
+# DEFAULT_FROM_EMAIL to an address on a verified domain, or mail leaves here
+# and is refused there.
 _email = _email_settings(os.environ)
 EMAIL_BACKEND = _email["EMAIL_BACKEND"]
 EMAIL_HOST = _email["EMAIL_HOST"]
@@ -245,6 +251,7 @@ EMAIL_HOST_PASSWORD = _email["EMAIL_HOST_PASSWORD"]
 EMAIL_USE_TLS = _email["EMAIL_USE_TLS"]
 EMAIL_TIMEOUT = _email["EMAIL_TIMEOUT"]
 DEFAULT_FROM_EMAIL = _email["DEFAULT_FROM_EMAIL"]
+RESEND_API_KEY = _email["RESEND_API_KEY"]
 PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:5173")
 
 LANGUAGE_CODE = "en-us"

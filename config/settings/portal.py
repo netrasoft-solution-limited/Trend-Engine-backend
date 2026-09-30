@@ -52,7 +52,7 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 LOGIN_URL = "/portal/login"
 
-ALLOWED_HOSTS = [h for h in env("PORTAL_ALLOWED_HOSTS", "").split(",") if h] or ALLOWED_HOSTS
+ALLOWED_HOSTS = [h for h in env("PORTAL_ALLOWED_HOSTS", "").split(",") if h] or ALLOWED_HOSTS  # noqa: F405
 CSRF_TRUSTED_ORIGINS = [o for o in env("PORTAL_TRUSTED_ORIGINS", "").split(",") if o]
 
 MIDDLEWARE = COMMON_MIDDLEWARE + [
