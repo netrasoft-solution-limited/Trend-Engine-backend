@@ -70,9 +70,21 @@ class OperatorUser(AbstractBaseUser, PermissionsMixin):
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    #: PRD §7.1 requires MFA where supported; `ops.py` sets OPERATOR_REQUIRE_MFA.
-    mfa_enabled = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
+
+    # ── Second factor (PRD §7.1) ────────────────────────────────────────────
+    #: True once a code from the enrolled authenticator has been verified — not
+    #: when a secret is generated. A secret nobody has proved they can read is
+    #: not a second factor, it is a lockout waiting to happen.
+    mfa_enabled = models.BooleanField(default=False)
+    #: Fernet-encrypted. In plaintext, a database dump would let whoever holds
+    #: it generate valid codes forever while the account looked normal.
+    totp_secret = models.TextField(blank=True)
+    totp_confirmed_at = models.DateTimeField(null=True, blank=True)
+    #: The 30-second step of the last accepted code. A TOTP code is valid for
+    #: its whole step, so one observed over a shoulder works again until that
+    #: step ends; anything at or below this is refused.
+    totp_last_counter = models.BigIntegerField(default=0)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["name"]
@@ -84,6 +96,49 @@ class OperatorUser(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+    @property
+    def mfa_ready(self) -> bool:
+        """Whether this account can complete a second-factor challenge."""
+        return bool(self.mfa_enabled and self.totp_secret)
+
+
+class RecoveryCode(models.Model):
+    """One single-use way back in after a lost authenticator.
+
+    A separate table rather than a JSON list on the user so that consuming one
+    is a row update the database can make atomic. Two simultaneous logins using
+    the same code would otherwise both read the list, both find it unused, and
+    both succeed.
+
+    Stored hashed with the password hasher: a recovery code IS a credential,
+    and storing one reversibly would mean the database held a second usable way
+    into every operator account.
+    """
+
+    #: NOT a ForeignKey, for the reason at the top of this module. Django
+    #: deconstructs any FK pointing at whatever `AUTH_USER_MODEL` currently
+    #: names into `settings.AUTH_USER_MODEL` — it substitutes the setting even
+    #: for a string literal, and even with `Meta.swappable` unset. So this
+    #: column would resolve to `operations_operatoruser` in the ops process and
+    #: `portal_orguser` in the portal one, over one shared database. That is
+    #: the same hazard `AuditEvent` above avoids the same way, and
+    #: `tests/test_migrations_are_settings_independent.py` is what caught it.
+    #:
+    #: The cost is no cascade delete. It is small: codes are only ever looked
+    #: up BY operator id, so a row left behind by a deleted account is
+    #: unreachable rather than dangerous, and `mfa.reset` clears them anyway.
+    operator_id = models.BigIntegerField(db_index=True)
+    code_hash = models.CharField(max_length=256)
+    created_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+        indexes = [models.Index(fields=["operator_id", "used_at"])]
+
+    def __str__(self) -> str:
+        return f"recovery code for {self.operator_id} ({'used' if self.used_at else 'unused'})"
 
 
 class AuditEvent(models.Model):
@@ -164,3 +219,6 @@ class CostEvent(models.Model):
 
     class Meta:
         ordering = ("-at",)
+
+    def __str__(self) -> str:
+        return f"{self.provider} ${self.estimated_usd} at {self.at:%Y-%m-%d %H:%M}"

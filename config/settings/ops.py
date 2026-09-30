@@ -53,9 +53,10 @@ MIDDLEWARE = COMMON_MIDDLEWARE + [
 
 # PRD §7.1: no open registration anywhere, MFA where supported.
 #
-# The second factor (TOTP) is NOT BUILT YET. Until it is, ops login checks the
-# password and then REFUSES with `mfa_not_implemented` while this is True — so
-# production has no ops login at all, rather than a password-only one.
+# TOTP, in `apps.operations.mfa`. While this is True a correct password buys
+# only a PENDING state — no session — until a code checks out. An account with
+# no authenticator yet enrols from that same state, which is what keeps
+# "require MFA" from deadlocking a system where nobody has enrolled.
 #
 # Local development turns it off with OPS_PASSWORD_ONLY_LOGIN=1, and that is
 # honoured only with DEBUG on: an environment variable set by mistake in
@@ -67,3 +68,12 @@ OPERATOR_REQUIRE_MFA = not (DEBUG and env("OPS_PASSWORD_ONLY_LOGIN", "0") == "1"
 #: operator session reads every tenant's data.
 OPERATOR_LOGIN_MAX_ATTEMPTS = 5
 OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60
+
+#: Codes per pending sign-in, before the password must be entered again.
+#: Six digits alone against unlimited guesses is not a second factor.
+OPERATOR_MFA_MAX_ATTEMPTS = 5
+
+#: What the operator sees in their authenticator app. Names the system rather
+#: than the domain, so someone holding codes for several environments can tell
+#: them apart.
+OPERATOR_MFA_ISSUER = env("OPERATOR_MFA_ISSUER", "Trend Engine")

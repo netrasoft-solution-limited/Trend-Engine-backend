@@ -88,6 +88,7 @@ def test_login_succeeds_and_says_no_mfa_was_required(api, operator_user, mfa_off
         "name": "Abubakar",
         "role": "operator",
         "role_label": "Operator",
+        "mfa_enabled": False,
         "mfa_required": False,
     }
     assert api.get(SESSION).status_code == 200
@@ -134,11 +135,21 @@ def test_login_is_rate_limited_per_email(api, operator_user, mfa_off, settings):
 # ── the MFA guard ───────────────────────────────────────────────────────────
 
 
-def test_with_mfa_required_a_correct_password_is_refused(api, operator_user, mfa_on):
+def test_with_mfa_required_a_correct_password_only_starts_the_challenge(
+    api, operator_user, mfa_on
+):
+    """It used to refuse outright, because there was no second factor to ask
+    for. Now the password buys a pending state and nothing else — an account
+    with no authenticator is sent to enrol, which is what keeps "require MFA"
+    from deadlocking a system where nobody has enrolled."""
     response = login(api)
 
-    assert response.status_code == 403
-    assert response.json()["code"] == "mfa_not_implemented"
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mfa_required"] is True
+    assert body["code"] == "mfa_setup_required"
+    # Still nothing that resembles a session.
+    assert "id" not in body and "email" not in body
 
 
 def test_with_mfa_required_no_session_is_created(api, operator_user, mfa_on):

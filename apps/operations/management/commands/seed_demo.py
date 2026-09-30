@@ -13,7 +13,7 @@ explicit, greppable opt-out rather than a default — see
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -62,7 +62,11 @@ class Command(BaseCommand):
 
         operator, created = OperatorUser.objects.get_or_create(
             email="abubakar@pureplay.example",
-            defaults={"name": "Abubakar", "role": OperatorUser.Role.PLATFORM_ADMIN, "is_staff": True},
+            defaults={
+                "name": "Abubakar",
+                "role": OperatorUser.Role.PLATFORM_ADMIN,
+                "is_staff": True,
+            },
         )
         if created:
             operator.set_password(PASSWORD)
@@ -86,7 +90,10 @@ class Command(BaseCommand):
         self.stdout.write(f"  password for every account: {PASSWORD}\n\n")
         self.stdout.write("  dana@jarrow.example        Org Admin  · Jarrow\n")
         self.stdout.write("  priya@jarrow.example       Org Viewer · Jarrow\n")
-        self.stdout.write("  sofia@consultant.example   TWO orgs   · Viewer at Jarrow, Admin at the fixture\n")
+        self.stdout.write(
+            "  sofia@consultant.example   TWO orgs   · Viewer at Jarrow, "
+            "Admin at the fixture\n"
+        )
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
@@ -179,7 +186,8 @@ class Command(BaseCommand):
                  "memory. Scores improved against placebo within the same participants."},
                 {"heading": "Study design", "text":
                  "Randomised crossover, n=24, each participant serving as their own control. "
-                 "Crossover designs reduce between-person variation but cannot rule out carry-over."},
+                 "Crossover designs reduce between-person variation but "
+                 "cannot rule out carry-over."},
                 {"heading": "Limitations", "text":
                  "Small sample. Single site. Short duration. One related meta-analysis remains "
                  "inconclusive."},

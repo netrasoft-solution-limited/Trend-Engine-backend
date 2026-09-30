@@ -21,7 +21,13 @@ class OperatorBackend(BaseBackend):
     usable session.
     """
 
-    def authenticate(self, request, email: str | None = None, password: str | None = None, **kwargs):
+    def authenticate(
+        self,
+        request,
+        email: str | None = None,
+        password: str | None = None,
+        **kwargs,
+    ):
         if email is None:
             email = kwargs.get("username")
         if not email or not password:

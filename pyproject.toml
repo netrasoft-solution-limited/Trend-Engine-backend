@@ -22,8 +22,10 @@ dependencies = [
     "httpx>=0.27",
     # Vendor credentials are stored encrypted so an operator can rotate them
     # without a deploy — see apps/sources/credentials.py for what that does
-    # and does not protect against.
+    # and does not protect against. Also encrypts operator TOTP secrets.
     "cryptography>=43.0",
+    # PRD §7.1's second factor for operators (apps/operations/totp.py).
+    "pyotp>=2.9",
     # The model layer. `apps/enrichment/llm/client.py` imports it lazily, so
     # migrations and the portal run without it — but nothing can be enriched
     # until it is installed.
