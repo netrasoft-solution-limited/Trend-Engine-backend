@@ -27,13 +27,37 @@ services:
   caddy:
     image: caddy:2-alpine
     ports: ["80:80", "443:443"]
+    environment:
+      # Both names must resolve to this host before Caddy can issue a
+      # certificate for either — `ops.` is a second A record.
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      OPS_ALLOWED_IPS: ${OPS_ALLOWED_IPS:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
       - static:/srv/static:ro
-    depends_on: [web-ops, web-portal]
+      - web:/srv/web:ro
+    depends_on:
+      web-ops: {condition: service_started}
+      web-portal: {condition: service_started}
+      # Must finish, not merely start: Caddy serving an empty /srv/web would
+      # answer every portal request with a 404 that looks like a routing bug.
+      frontend: {condition: service_completed_successfully}
     restart: unless-stopped
+
+  # ── The portal bundle ─────────────────────────────────────────────────────
+  # Runs once per deploy, copies the built SPA into a volume, exits. No Node
+  # process in production: the portal is static files plus a JSON API, and
+  # Caddy already serves files.
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    volumes:
+      - web:/srv/web
+    restart: "no"
 
   # ── Two WSGI processes, one codebase (Arch §5.3, §11.1) ───────────────────
   # Separate entry points give the planes independent middleware stacks and
@@ -118,5 +142,7 @@ volumes:
   pgdata:
   redisdata:
   static:
+  #: The built portal bundle, written by `frontend` and served by Caddy.
+  web:
   caddy_data:
   caddy_config:

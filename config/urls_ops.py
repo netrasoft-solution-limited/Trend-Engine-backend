@@ -1,4 +1,10 @@
-"""Operator plane URLconf — mounted at /ops/ by Caddy.
+"""Operator plane URLconf — the whole of `ops.<domain>`.
+
+The planes are split by ORIGIN, not by path (Arch §5.3 as amended), so this
+plane owns its origin's root. There is no `/ops/` prefix: on `ops.<domain>`
+it would be redundant, and a half-applied one is worse than none — the API
+carried it while `LOGIN_URL` did not, so the two disagreed about where the
+plane began.
 
 Every operator screen from PRD §6.5 lives here. The portal process does not
 import this module.
@@ -6,10 +12,9 @@ import this module.
 from django.urls import include, path
 
 urlpatterns = [
-    # The JSON API for the React ops client. Prefixed like the portal's
-    # `portal/`: Caddy forwards `/ops/*` here without stripping it.
-    path("ops/api/auth/", include("apps.operations.api_urls")),
-    path("ops/api/triage/", include("apps.scoring.api_urls")),
+    # The JSON API for the React ops client, at this origin's root.
+    path("api/auth/", include("apps.operations.api_urls")),
+    path("api/triage/", include("apps.scoring.api_urls")),
     # PRD §6.5 required screens, each owned by the app that owns its data.
     path("", include("apps.scoring.urls")),          # Triage · Signal review
     path("research/", include("apps.research.urls")),  # Research inbox

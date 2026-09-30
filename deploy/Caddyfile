@@ -1,44 +1,100 @@
 # Arch §11.1 — TLS termination and plane routing.
 #
-# The two planes differ in network exposure as well as in code:
-#   /portal/*  public internet, invite-only accounts
-#   /ops/*     identity-aware or IP-restricted — never simply public
+# THE PLANES ARE SPLIT BY ORIGIN, NOT BY PATH.
 #
-# Path-based routing here matches the cookie paths in the settings modules, so
-# a browser holding an operator session will not send it to a portal URL.
+#   https://ops.{$SITE_DOMAIN}/    operator plane — identity-aware, never public
+#   https://{$SITE_DOMAIN}/portal/ tenant plane   — public internet, invited accounts
+#
+# This file previously routed both planes by path on one domain, which broke
+# the deployment in two ways that only show up in a browser:
+#
+#   · `__Host-` cookies require `Path=/` exactly (RFC 6265bis §4.1.3.2). Both
+#     settings modules set that name and that path, so on a shared origin the
+#     browser would have had two `Path=/` cookies for the same host and sent
+#     BOTH to both planes. The prefix exists to prevent exactly that.
+#   · Cookie `Path` is matched against the request URL, not the calling page.
+#     A stored XSS on a portal page could therefore have issued
+#     `fetch('/ops/…', {credentials: 'include'})` and had the operator cookie
+#     attached. A separate origin is what actually stops that; a path never did.
+#
+# The operator plane owns the whole of its origin — there is no `/ops/` prefix
+# behind `ops.<domain>`, and `config/urls_ops.py` matches.
+#
+# DNS: both names must resolve to this host before Caddy can issue a
+# certificate for either. `ops.<domain>` is a second A record, easy to forget.
+{
+	# Fail loudly at startup rather than silently issuing for "localhost".
+	email {$ACME_EMAIL}
+}
 
-{$SITE_DOMAIN} {
+(hardening) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# ── Operator plane ──────────────────────────────────────────────────────────
+# PRD §7.1 calls the internal tool "private / identity-aware; not public".
+# Restrict this before launch: leaving it open is the cheapest way to undo the
+# whole two-realm design. Uncomment once OPS_ALLOWED_IPS is set — an empty
+# matcher list would otherwise lock everyone out including you.
+ops.{$SITE_DOMAIN} {
 	encode zstd gzip
+	import hardening
 
-	# Static assets, served by Caddy rather than Django.
+	# @office remote_ip {$OPS_ALLOWED_IPS}
+	# handle @office { reverse_proxy web-ops:8000 }
+	# handle { abort }
+
 	handle_path /static/* {
 		root * /srv/static
 		file_server
 	}
 
-	# ── Tenant plane ────────────────────────────────────────────────────────
-	handle /portal/* {
+	reverse_proxy web-ops:8000
+}
+
+# ── Tenant plane ────────────────────────────────────────────────────────────
+{$SITE_DOMAIN} {
+	encode zstd gzip
+	import hardening
+
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	# The API first: a more specific matcher must come before the SPA
+	# fallback, or every XHR would be answered with index.html and a 200,
+	# which fails as a JSON parse error a long way from the cause.
+	handle /portal/api/* {
 		reverse_proxy web-portal:8000
 	}
 
-	# ── Operator plane ──────────────────────────────────────────────────────
-	# Restrict before launch. The PRD calls the internal tool "private /
-	# identity-aware; not public" (§7.1) — leaving this open is the cheapest
-	# way to undo the whole two-realm design.
-	handle /ops/* {
-		# @allowed remote_ip {$OPS_ALLOWED_IPS}
-		# abort @not_allowed
-		reverse_proxy web-ops:8000
+	# The React portal. `try_files` ends at index.html so that a deep link —
+	# /portal/publications/14, or a password-reset URL from an email — is
+	# handed to the client router instead of 404ing.
+	handle /portal/* {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
 	}
 
+	# `redir * /portal/ permanent` — the `*` matcher is REQUIRED. Without it
+	# Caddy reads `/portal/` as a path matcher and `permanent` as the
+	# destination, so the fallback answers an empty 200 and the apex silently
+	# serves nothing. It validates cleanly either way; only a request shows it.
 	handle {
-		redir /portal/ permanent
-	}
-
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
+		redir * /portal/ permanent
 	}
 }
+
+# Anything else resolving to this host — a wildcard record, a stray CNAME —
+# gets no response at all: Caddy holds a certificate only for the two names
+# above, so an unknown SNI fails the TLS handshake before Django sees a byte.
+# No catch-all block is needed to achieve that, and adding one would make
+# Caddy try to obtain a certificate for whatever was asked for.

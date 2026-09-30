@@ -13,10 +13,10 @@ from apps.operations.models import OperatorUser
 
 pytestmark = pytest.mark.django_db
 
-CSRF = "/ops/api/auth/csrf"
-LOGIN = "/ops/api/auth/login"
-LOGOUT = "/ops/api/auth/logout"
-SESSION = "/ops/api/auth/session"
+CSRF = "/api/auth/csrf"
+LOGIN = "/api/auth/login"
+LOGOUT = "/api/auth/logout"
+SESSION = "/api/auth/session"
 
 EMAIL = "abubakar@pureplay.example"
 PASSWORD = "correct-horse-battery-9"

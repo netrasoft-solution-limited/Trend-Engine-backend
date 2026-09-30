@@ -1,4 +1,4 @@
-"""Triage endpoints of the operator plane's JSON API — `/ops/api/triage/*`.
+"""Triage endpoints of the operator plane's JSON API — `ops.<domain>/api/triage/*`.
 
 Operator authentication comes from the ops API defaults: session auth and
 `IsAuthenticated` (REST_FRAMEWORK in base.py), behind LoginRequiredMiddleware.

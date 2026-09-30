@@ -1,6 +1,6 @@
 """URL patterns for the operator plane's auth API.
 
-Mounted at `ops/api/auth/` by config/urls_ops.py. Caddy forwards `/ops/*` to
+Mounted at `api/auth/` by config/urls_ops.py, on the `ops.<domain>` origin.
 the ops process without stripping the prefix, as it does `/portal/*` for the
 portal.
 """

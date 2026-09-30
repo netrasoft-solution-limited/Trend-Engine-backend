@@ -1,5 +1,5 @@
-"""URL patterns for the Triage JSON endpoints, mounted at `ops/api/triage/` by
-config/urls_ops.py."""
+"""URL patterns for the Triage JSON endpoints, mounted at `api/triage/` by
+config/urls_ops.py, on the `ops.<domain>` origin."""
 from django.urls import path
 
 from . import api

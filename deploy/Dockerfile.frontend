@@ -1,0 +1,33 @@
+# Builds the React portal into a volume Caddy serves directly.
+#
+# There is no Node process in production. The portal is a static bundle and a
+# JSON API; putting a Node server in front of static files would add a process
+# to supervise, patch and restart for nothing. Caddy already serves files.
+#
+# Build context is the REPOSITORY ROOT, so that this can see ../frontend from
+# deploy/ — the same context the Django image uses.
+
+FROM node:22-alpine AS build
+
+WORKDIR /build
+
+# Dependencies first, so a source-only change does not reinstall them.
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+
+# `npm run build` runs typecheck first — see frontend/package.json. A type
+# error fails the image build rather than shipping a bundle nobody typechecked,
+# which is how `vite build` behaves on its own.
+RUN npm run build
+
+# The runtime stage exists only to hand the bundle to a volume. It copies the
+# build into /srv/web on start and exits; Caddy mounts the same volume.
+FROM alpine:3.20
+
+COPY --from=build /build/dist /dist
+
+# `--delete` so a file removed from the build does not linger in the volume
+# across deploys, still being served.
+CMD ["sh", "-c", "rm -rf /srv/web/* && cp -r /dist/. /srv/web/ && echo 'portal bundle published to /srv/web'"]

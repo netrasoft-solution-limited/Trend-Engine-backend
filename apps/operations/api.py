@@ -1,4 +1,4 @@
-"""The operator plane's JSON auth API — `/ops/api/auth/*`.
+"""The operator plane's JSON auth API — `ops.<domain>/api/auth/*`.
 
 The Triage endpoints live with the Triage data, in `apps.scoring.api`; this
 app may not import `scoring` (see apps/operations/models.py).

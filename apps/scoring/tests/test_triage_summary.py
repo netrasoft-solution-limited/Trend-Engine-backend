@@ -1,4 +1,4 @@
-"""GET /ops/api/triage/summary — counts, window, ranking, errors, auth."""
+"""GET ops.<domain>/api/triage/summary — counts, window, ranking, errors, auth."""
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
@@ -21,7 +21,7 @@ from apps.tenancy.models import Organization
 
 pytestmark = pytest.mark.django_db
 
-SUMMARY = "/ops/api/triage/summary"
+SUMMARY = "/api/triage/summary"
 
 
 @pytest.fixture(autouse=True)
