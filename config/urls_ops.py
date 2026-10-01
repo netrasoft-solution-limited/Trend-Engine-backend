@@ -15,8 +15,10 @@ urlpatterns = [
     # The JSON API for the React ops client, at this origin's root.
     path("api/auth/", include("apps.operations.api_urls")),
     # Server-rendered sign-in at the origin root. LOGIN_URL points at /login,
-    # so without this every operator screen redirects to a 404.
-    path("", include("apps.operations.urls")),
+    # so without this every operator screen redirects to a 404. A separate
+    # module from `operations.urls` below, which is mounted at a prefix — one
+    # module under two prefixes served every login page twice.
+    path("", include("apps.operations.auth_urls")),
     path("api/triage/", include("apps.scoring.api_urls")),
     # PRD §6.5 required screens, each owned by the app that owns its data.
     path("", include("apps.scoring.urls")),          # Triage · Signal review
