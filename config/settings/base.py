@@ -138,6 +138,23 @@ CACHES = {
     }
 }
 
+# `config/celery.py` calls `config_from_object("django.conf:settings",
+# namespace="CELERY")`, so Celery reads CELERY_-prefixed settings from here and
+# NOTHING ELSE. Without this line it never sees REDIS_URL and silently falls
+# back to its own default broker — amqp://guest@localhost:5672, a RabbitMQ that
+# does not exist in this deployment.
+#
+# That failure is quiet in the worst way: every worker and beat start, report
+# healthy to `docker compose ps`, and sit in a reconnect loop. The whole async
+# pipeline — collection, the relevance gate, transcripts, extraction — is dead
+# while the stack looks fine.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", REDIS_URL)
+
+# No result backend, deliberately. Tasks return a dict for the logs and the
+# Ingestion Runs screen reads the database, not Celery — so storing every
+# result would write rows to Redis that nothing ever reads back.
+CELERY_TASK_IGNORE_RESULT = True
+
 STORAGES = {
     "default": {"BACKEND": "storages.backends.s3.S3Storage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
