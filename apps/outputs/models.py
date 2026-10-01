@@ -63,7 +63,9 @@ class Output(TenantScopedModel):
 
     type = models.CharField(max_length=32, choices=OutputType.choices)
     title = models.CharField(max_length=300)
-    state = models.CharField(max_length=20, choices=OutputState.choices, default=OutputState.DRAFTING)
+    state = models.CharField(
+        max_length=20, choices=OutputState.choices, default=OutputState.DRAFTING
+    )
 
     #: PRD §6.4: every output records exactly one tenant, one client-profile
     #: version and one domain-pack version. The tenant is `organization`.

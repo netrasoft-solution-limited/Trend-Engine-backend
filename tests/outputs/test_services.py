@@ -1,5 +1,11 @@
 """Drafting and approval.
 
+Lives in `tests/`, not `apps/outputs/tests/`, because it asserts what the
+publication gate does with what drafting produces — and `.importlinter` puts
+`apps.publication` above `apps.outputs`, so a test inside the app may not
+import it. The top-level tree is outside the `apps` root package and can see
+both sides.
+
 One test here matters more than the rest: that `approve()` creates no
 Publication. PRD §6.9 exists because collapsing approval into publication
 "removes the operator's last point of control and makes accidental disclosure a
@@ -12,7 +18,14 @@ import pytest
 
 from apps.operations.models import AuditEvent
 from apps.outputs import services
-from apps.outputs.models import Approval, ExpertReview, Output, OutputState, OutputType, OutputVersion
+from apps.outputs.models import (
+    Approval,
+    ExpertReview,
+    Output,
+    OutputState,
+    OutputType,
+    OutputVersion,
+)
 from apps.publication import services as gate
 from apps.publication.models import Publication
 from apps.tenancy.context import operator_scope
