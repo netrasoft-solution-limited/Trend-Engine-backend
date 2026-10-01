@@ -86,10 +86,15 @@ def test_the_portal_api_is_matched_before_the_spa_fallback(caddyfile):
     """
     directives = _directives(caddyfile)
     api = directives.find("handle /portal/api/")
-    spa = directives.find("handle /portal/*")
+    spa = directives.find("handle_path /portal/*")
 
     assert api != -1, "the portal API needs its own matcher"
     assert spa != -1, "the portal SPA needs a matcher"
+    # The API matcher must NOT strip: Django routes on the full /portal/api/…
+    # path, so a stripped prefix would 404 every endpoint.
+    assert "handle_path /portal/api/" not in directives, (
+        "the API prefix must reach Django intact"
+    )
     assert api < spa, "the API matcher must come before the SPA catch-all"
 
 
@@ -110,6 +115,36 @@ def test_the_apex_redirect_carries_an_explicit_matcher(caddyfile):
     )
     assert not re.search(r"redir\s+/portal/\s+permanent", directives), (
         "Without a matcher, `permanent` is parsed as the destination URL."
+    )
+
+
+def test_the_portal_prefix_is_stripped_before_the_file_lookup(caddyfile):
+    """The bundle lives at the volume root, so /portal/assets/x.js is the file
+    /srv/web/assets/x.js — the prefix has to come off.
+
+    With a plain `handle`, the asset request keeps its prefix, finds no file,
+    and falls through to the apex redirect: the browser is handed HTML where it
+    expected JavaScript and the portal never boots. It is invisible to every
+    check that talks to the API directly, because the API is fine.
+    """
+    directives = _directives(caddyfile)
+
+    assert "handle_path /portal/*" in directives, (
+        "The portal block must strip its prefix, or every asset request returns "
+        "index.html with a 200."
+    )
+
+
+def test_vite_and_caddy_agree_on_the_portal_prefix():
+    """Two halves of one decision, in two repositories. If `base` is dropped,
+    index.html asks for `/assets/…`, which matches no portal route at all."""
+    vite = (BACKEND.parent / "frontend" / "vite.config.ts")
+    if not vite.exists():
+        pytest.skip("the frontend repository is not checked out beside this one")
+
+    assert "base: '/portal/'" in vite.read_text(), (
+        "vite.config.ts must set base: '/portal/' to match the Caddyfile's "
+        "handle_path /portal/*"
     )
 
 

@@ -75,10 +75,18 @@ ops.{$SITE_DOMAIN} {
 		reverse_proxy web-portal:8000
 	}
 
-	# The React portal. `try_files` ends at index.html so that a deep link —
-	# /portal/publications/14, or a password-reset URL from an email — is
-	# handed to the client router instead of 404ing.
-	handle /portal/* {
+	# The React portal. `handle_path` STRIPS the prefix, because the bundle
+	# lives at the volume root — /portal/assets/x.js is the file /srv/web/assets
+	# /x.js. Without the strip the asset request falls through to the apex
+	# redirect below and the browser is handed HTML where it expected
+	# JavaScript, so the page never boots. `vite.config.ts` sets a matching
+	# `base: '/portal/'` so index.html asks for the prefixed path in the first
+	# place; the two have to agree.
+	#
+	# `try_files` ends at index.html so a deep link — /portal/output/14, or a
+	# password-reset URL from an email — reaches the client router rather than
+	# 404ing.
+	handle_path /portal/* {
 		root * /srv/web
 		try_files {path} /index.html
 		file_server
