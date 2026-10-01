@@ -73,6 +73,17 @@ OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60
 #: Six digits alone against unlimited guesses is not a second factor.
 OPERATOR_MFA_MAX_ATTEMPTS = 5
 
+# Per-SOURCE-ADDRESS ceilings, alongside the per-account ones above. The
+# per-account bucket alone never sees an attacker spraying one guess each
+# across many addresses, and Arch §431 lets this plane be identity-aware
+# INSTEAD of IP-restricted — so there is no allowlist in front of it.
+#
+# Deliberately far above the per-account limits: an office behind one NAT is
+# many legitimate people sharing an address. These are sized to stop spraying,
+# not to stop a team arriving at nine o'clock.
+OPERATOR_LOGIN_MAX_ATTEMPTS_PER_IP = 40
+OPERATOR_MFA_MAX_ATTEMPTS_PER_IP = 40
+
 #: What the operator sees in their authenticator app. Names the system rather
 #: than the domain, so someone holding codes for several environments can tell
 #: them apart.

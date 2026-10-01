@@ -29,7 +29,6 @@ from django.conf import settings
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.contrib.auth.decorators import login_not_required
-from django.core.cache import cache
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from rest_framework import status
@@ -40,6 +39,7 @@ from rest_framework.views import APIView
 from . import mfa
 from . import serializers as s
 from .auth import OperatorBackend
+from .throttle import login_buckets, mfa_buckets
 
 # See the same decorator in apps/portal/views.py: exempt from
 # LoginRequiredMiddleware so DRF, not a 302 to an HTML page, decides the answer.
@@ -66,9 +66,11 @@ class LoginView(APIView):
         form.is_valid(raise_exception=True)
         email = form.validated_data["email"].strip().lower()
 
-        bucket = f"ops-login:{email}"
-        attempts = cache.get(bucket, 0)
-        if attempts >= settings.OPERATOR_LOGIN_MAX_ATTEMPTS:
+        # Two ceilings: per account, and per source address. The first alone
+        # never sees one guess sprayed across many accounts, and with no IP
+        # allowlist in front of this plane (Arch §431) that is reachable.
+        by_email, by_ip = login_buckets(request, email)
+        if by_email.exceeded or by_ip.exceeded:
             return Response(
                 {"detail": "Too many attempts. Try again shortly.", "code": "rate_limited"},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -78,14 +80,15 @@ class LoginView(APIView):
             request, email=email, password=form.validated_data["password"]
         )
         if user is None:
-            cache.set(bucket, attempts + 1, settings.OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS)
+            by_email.record()
+            by_ip.record()
             # One message for "no such account" and "wrong password".
             return Response(
                 {"detail": "That email and password do not match.", "code": "invalid_credentials"},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        cache.delete(bucket)
+        by_email.clear()
 
         if settings.OPERATOR_REQUIRE_MFA:
             # The password is right, and that is ALL it buys. No session is
@@ -213,9 +216,8 @@ class MfaVerifyView(APIView):
 
         # Rate-limited separately from the password. Without this the second
         # factor is six digits standing alone against unlimited guesses.
-        bucket = f"ops-mfa:{user.pk}"
-        attempts = cache.get(bucket, 0)
-        if attempts >= settings.OPERATOR_MFA_MAX_ATTEMPTS:
+        by_user, by_ip = mfa_buckets(request, user.pk)
+        if by_user.exceeded or by_ip.exceeded:
             mfa.clear_pending(request.session)
             return Response(
                 {
@@ -232,7 +234,8 @@ class MfaVerifyView(APIView):
             )
 
         if not mfa.verify_code(user, form.validated_data["code"]):
-            cache.set(bucket, attempts + 1, settings.OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS)
+            by_user.record()
+            by_ip.record()
             # One message whether the code was wrong, expired or already used:
             # telling them apart tells an attacker their guess was right.
             return Response(
@@ -240,7 +243,7 @@ class MfaVerifyView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        cache.delete(bucket)
+        by_user.clear()
         return _complete_login(request, user)
 
 

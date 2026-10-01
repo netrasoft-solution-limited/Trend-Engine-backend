@@ -172,6 +172,17 @@ TEMPLATES = [
 # the original request was secure.
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+#: How many proxies sit between the internet and this process — 1 for the
+#: Caddy in docker-compose. `apps.operations.throttle.client_ip` counts that
+#: many entries from the RIGHT of X-Forwarded-For, because Caddy appends the
+#: real peer to whatever arrived and everything to its left is caller-supplied.
+#:
+#: ZERO means the header is ignored entirely. That is the safe default: trusting
+#: a forged X-Forwarded-For would let one attacker present a new address per
+#: request and never be throttled at all, which is worse than no throttle,
+#: because the logs would look fine.
+TRUSTED_PROXY_DEPTH = int(env("TRUSTED_PROXY_DEPTH", "0"))
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 

@@ -25,7 +25,6 @@ from django.conf import settings
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 from django.contrib.auth.decorators import login_not_required
-from django.core.cache import cache
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
@@ -33,6 +32,7 @@ from django.views import View
 
 from . import mfa
 from .auth import OperatorBackend
+from .throttle import login_buckets, mfa_buckets
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +61,8 @@ class LoginView(View):
         email = (request.POST.get("email") or "").strip().lower()
         password = request.POST.get("password") or ""
 
-        bucket = f"ops-login:{email}"
-        attempts = cache.get(bucket, 0)
-        if attempts >= settings.OPERATOR_LOGIN_MAX_ATTEMPTS:
+        by_email, by_ip = login_buckets(request, email)
+        if by_email.exceeded or by_ip.exceeded:
             return render(
                 request,
                 "ops/login.html",
@@ -73,7 +72,10 @@ class LoginView(View):
 
         user = OperatorBackend().authenticate(request, email=email, password=password)
         if user is None:
-            cache.set(bucket, attempts + 1, settings.OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS)
+            by_email.record()
+            # Counted per address too, so spraying one guess each across many
+            # accounts is bounded even though no single account locks.
+            by_ip.record()
             # One message for "no such account" and "wrong password".
             return render(
                 request,
@@ -82,7 +84,7 @@ class LoginView(View):
                 status=401,
             )
 
-        cache.delete(bucket)
+        by_email.clear()
 
         if not settings.OPERATOR_REQUIRE_MFA:
             django_login(request, user, backend="apps.operations.auth.OperatorBackend")
@@ -110,9 +112,8 @@ class MfaView(View):
         if user is None:
             return redirect("ops-login")
 
-        bucket = f"ops-mfa:{user.pk}"
-        attempts = cache.get(bucket, 0)
-        if attempts >= settings.OPERATOR_MFA_MAX_ATTEMPTS:
+        by_user, by_ip = mfa_buckets(request, user.pk)
+        if by_user.exceeded or by_ip.exceeded:
             # Discard the pending state, so the ceiling is not a speed bump
             # someone waits out with the session still half open.
             mfa.clear_pending(request.session)
@@ -124,7 +125,8 @@ class MfaView(View):
             )
 
         if not mfa.verify_code(user, request.POST.get("code") or ""):
-            cache.set(bucket, attempts + 1, settings.OPERATOR_LOGIN_ATTEMPT_WINDOW_SECONDS)
+            by_user.record()
+            by_ip.record()
             return render(
                 request,
                 "ops/mfa.html",
@@ -134,7 +136,7 @@ class MfaView(View):
                 status=401,
             )
 
-        cache.delete(bucket)
+        by_user.clear()
         return _complete(request, user)
 
 
