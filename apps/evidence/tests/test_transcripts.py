@@ -184,6 +184,33 @@ def test_a_success_after_a_failure_is_still_a_success(podcast_item, rungs):
     assert outcome.retryable is False, "retryable is about ending WITHOUT a transcript"
 
 
+def test_an_unconfigured_provider_does_not_write_the_item_off(podcast_item, rungs):
+    """"No credential" / "no approved policy" / "paused at its cap" describe
+    the DEPLOYMENT, not the item.
+
+    Treating them as "no rung can ever serve this" would mark every item that
+    arrived during a misconfiguration as metadata-only, permanently — and
+    extraction would refuse them for the rest of their lives once it was fixed.
+    """
+    from apps.connectors.factory import ConnectorUnavailable
+
+    def unconfigured(item):
+        raise ConnectorUnavailable("AssemblyAI has no 'api_key' credential")
+
+    import apps.evidence.services.transcripts as mod
+
+    rungs(taddy=unavailable(), assemblyai=mod._assemblyai)
+    # Drive the real rung so the factory raises for real.
+    podcast_item.source.policy = None
+    podcast_item.source.save()
+
+    outcome = acquire(podcast_item)
+    podcast_item.refresh_from_db()
+
+    assert outcome.retryable, "a misconfiguration must leave the item retryable"
+    assert podcast_item.acquisition_route != "metadata_only"
+
+
 def test_an_unexpected_error_counts_as_transient(podcast_item, rungs):
     """An unrecognised exception is not evidence that the item has no
     transcript, so it must keep the item alive rather than bury it."""

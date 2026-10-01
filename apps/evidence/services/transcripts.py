@@ -13,8 +13,12 @@ a transcript:
   · UNAVAILABLE — no rung can ever serve this item. A YouTube video with
     captions disabled, a podcast nobody transcribed. The item is honestly
     metadata-only (Arch §7.1) and that is a final answer.
-  · FAILED — a rung broke transiently. AssemblyAI timed out, Apify 500'd.
-    Nothing has been learned about the item at all.
+  · FAILED — nothing was learned about the item. A rung broke transiently
+    (AssemblyAI timed out, Apify 500'd), OR the system was not configured to
+    try at all: no credential, no approved policy, a provider paused at its
+    cap. That last group reads like "unavailable" and is not — it describes
+    the DEPLOYMENT, not the item, and every item that arrived during a
+    misconfiguration would otherwise be written off for good.
 
 Collapsing those loses real evidence: an item marked metadata-only because
 AssemblyAI was down for ten minutes stays metadata-only forever, and extraction
@@ -128,7 +132,13 @@ def _taddy(item: ContentItem) -> Transcript:
     try:
         connector = taddy_for(item.source)
     except ConnectorUnavailable as exc:
-        raise Unavailable(str(exc)) from exc
+        # FAILED, not Unavailable. This says the system is not configured to
+        # try — no credential, no approved policy, provider paused at its cap —
+        # which is a fact about the deployment, not about the item. Treating it
+        # as "no rung can ever serve this" would write off every item that
+        # arrived during a misconfiguration, permanently, and extraction would
+        # refuse them for the rest of their lives once it was fixed.
+        raise Failed(str(exc)) from exc
 
     try:
         result = connector.transcript(item.external_id)
@@ -161,7 +171,7 @@ def _apify_subtitles(item: ContentItem) -> Transcript:
     try:
         connector = apify_for(item.source)
     except ConnectorUnavailable as exc:
-        raise Unavailable(str(exc)) from exc
+        raise Failed(str(exc)) from exc  # see the note in `_taddy`
 
     try:
         rows = connector.fetch_by_url([item.url])
@@ -194,7 +204,7 @@ def _assemblyai(item: ContentItem) -> Transcript:
     try:
         connector = assemblyai_for(item.source)
     except ConnectorUnavailable as exc:
-        raise Unavailable(str(exc)) from exc
+        raise Failed(str(exc)) from exc  # see the note in `_taddy`
 
     # Arch §10.2: the cap is checked BEFORE the call. This is the one rung that
     # bills by the hour, so a three-hour episode is where a per-item ceiling
