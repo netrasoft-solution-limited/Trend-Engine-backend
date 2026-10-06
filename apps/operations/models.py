@@ -222,3 +222,59 @@ class CostEvent(models.Model):
 
     def __str__(self) -> str:
         return f"{self.provider} ${self.estimated_usd} at {self.at:%Y-%m-%d %H:%M}"
+
+
+class BackupRun(models.Model):
+    """One backup or restore-test attempt. Arch §11.3, Arch §13.
+
+    Not tenant-scoped: a database dump is infrastructure, not any tenant's
+    data. Same shape as `CostEvent` above for that reason.
+
+    This table exists because "did last night's backup run?" has to be
+    answerable without SSH. A backup job whose only output is a log line is
+    one nobody checks, and the first time anyone looks is after the box is
+    gone. The Operations screen reads `latest()` and shows its age.
+
+    Failures are recorded, not just successes — a run that refused because
+    `BACKUP_TARGET` is unset must leave a mark, or an unconfigured backup
+    looks exactly like a working one.
+    """
+
+    class Kind(models.TextChoices):
+        BACKUP = "backup", "Nightly backup"
+        RESTORE_TEST = "restore_test", "Restore test"
+
+    class Outcome(models.TextChoices):
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped — not configured"
+
+    kind = models.CharField(max_length=16, choices=Kind.choices, db_index=True)
+    outcome = models.CharField(max_length=16, choices=Outcome.choices)
+    started_at = models.DateTimeField(db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    #: The object key in the bucket, so a restore has something to ask for.
+    artifact = models.CharField(max_length=300, blank=True)
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+    #: Of the dump file. The restore test re-computes it before trusting the
+    #: download — a truncated upload restores "successfully" into an empty
+    #: database otherwise.
+    sha256 = models.CharField(max_length=64, blank=True)
+    detail = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+        indexes = [models.Index(fields=["kind", "-started_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.outcome} at {self.started_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.finished_at is None:
+            return None
+        return (self.finished_at - self.started_at).total_seconds()
+
+    @classmethod
+    def latest(cls, kind: str) -> "BackupRun | None":
+        return cls.objects.filter(kind=kind).first()

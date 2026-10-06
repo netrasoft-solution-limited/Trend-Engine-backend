@@ -1,0 +1,99 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Why each claim scored what it did.
+
+The unmatched list is the useful half. A claim that obviously belongs to this
+client sitting at zero tells you the profile is missing the word the speaker
+used — which is a thing you can fix in a minute, and the only way the profile
+gets better.
+{% endcomment %}
+{% block title %}{{ organization.name }} · relevance{% endblock %}
+
+{% block content %}
+  <h1>Relevance</h1>
+  <p class="lede">
+    <a href="{% url 'ops-client' organization.slug %}">← {{ organization.name }}</a>
+    {% if profile %}· scored against profile v{{ profile.number }}{% endif %}
+  </p>
+
+  {% if not profile %}
+    <div class="card">
+      <p>This client has no live profile, so nothing can be scored for them yet.</p>
+      <p class="note">
+        Read their storefront or write a profile by hand from the client page.
+      </p>
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="row">
+        <span class="name">{{ matched }} of {{ total }} claims are this client's</span>
+        <form method="post" action="{% url 'ops-client-score' organization.slug %}">
+          {% csrf_token %}<button type="submit" class="small">Score again</button>
+        </form>
+      </div>
+      <p class="note">
+        The corpus is shared by every client; the selection is not. A score here is
+        {{ weights.asset }}% what they sell, {{ weights.audience }}% who they sell to and
+        {{ weights.priority }}% what they are pushing, normalised to 0–100.
+        How fast the category is moving is not in it yet — that needs a 28-day
+        baseline the corpus is still accumulating.
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="name">Strongest fits</span>
+      <table>
+        <thead><tr><th>Score</th><th>Claim</th><th>Why</th></tr></thead>
+        <tbody>
+          {% for row in top %}
+            <tr>
+              <td><b>{{ row.fit_score }}</b></td>
+              <td>
+                {{ row.claim.subject }}
+                <div class="note" style="margin-top:2px">{{ row.claim.content_item.title }}</div>
+              </td>
+              <td class="muted">
+                {{ row.why }}
+                <div class="note" style="margin-top:2px">
+                  asset {{ row.asset_component }} · audience {{ row.audience_component }}
+                  · priority {{ row.priority_component }}
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="3" class="empty">
+              Nothing matched. The terms are probably narrower than the words
+              people actually say — see the unmatched claims below.
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <span class="name">Not this client's</span>
+        <span class="state">{{ unmatched }}</span>
+      </div>
+      <p class="note">
+        These are real evidence that matched nothing in the profile. If one of them
+        obviously belongs to this client, the profile is missing the word the
+        speaker used — add it and score again.
+      </p>
+      <table>
+        <tbody>
+          {% for row in missed %}
+            <tr>
+              <td>
+                {{ row.claim.subject }}
+                <div class="note" style="margin-top:2px">{{ row.claim.content_item.title }}</div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td class="empty">Everything in the corpus matched.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

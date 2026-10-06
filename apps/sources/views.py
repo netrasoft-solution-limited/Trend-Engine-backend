@@ -27,8 +27,9 @@ from django.views import View
 
 from apps.operations.models import AuditEvent
 
+from . import registry
 from .credentials import CredentialUnreadable
-from .models import AcquisitionProvider
+from .models import AcquisitionProvider, ProviderPolicyVersion, Source
 
 #: Which named secrets each provider takes. Taddy needs two and authenticates
 #: with neither alone, which is why the stored blob is a mapping rather than a
@@ -172,3 +173,287 @@ def provider_health(provider: AcquisitionProvider) -> str:
     except CredentialUnreadable:
         return "unreadable"
     return "environment" if provider.credential() else "missing"
+
+
+# ── Source registry (PRD §6.5) ──────────────────────────────────────────────
+#
+# Which shows and channels are watched, and how often. Before this screen it was
+# a management command, which meant only whoever had a terminal could answer
+# "can we start watching this podcast?".
+#
+# Two things the screen is responsible for that a shell was not:
+#
+#   · Refusing a source that cannot collect. A `Source` with the wrong config
+#     keys saves perfectly and then silently returns nothing forever — the
+#     failure mode that looks like a quiet category rather than a broken
+#     source. `registry.config_problem()` is checked before save and shown on
+#     every row afterwards.
+#   · Making the access basis visible. PRD §7.2: no connector runs without a
+#     recorded policy. `Source.can_collect` already enforces it; the screen is
+#     what stops an operator wondering why their new feed does nothing.
+
+
+class SourceListView(View):
+    """Every source, what it is set to collect, and whether it can."""
+
+    def get(self, request):
+        _require_platform_admin(request)
+
+        rows = []
+        for source in Source.objects.select_related("policy", "policy__provider").all():
+            rows.append(
+                {
+                    "obj": source,
+                    "summary": registry.describe_config(source.route, source.config),
+                    "problem": registry.config_problem(source.route, source.config),
+                }
+            )
+
+        live = _live_policies()
+        return render(
+            request,
+            "ops/sources/sources.html",
+            {
+                "sources": rows,
+                "specs": [
+                    {"spec": spec, "policies": registry.policies_for(spec.route, live)}
+                    for spec in registry.available_specs()
+                ],
+                "blocked": [s for s in registry.SPECS.values() if not s.available],
+                "policies": live,
+            },
+        )
+
+    def post(self, request):
+        """Add a source."""
+        _require_platform_admin(request)
+
+        name = (request.POST.get("name") or "").strip()
+        route = request.POST.get("route") or ""
+        spec = registry.spec_for(route)
+
+        if not name:
+            messages.error(request, "A source needs a name you will recognise later.")
+            return redirect(reverse("ops-sources"))
+        if spec is None or not spec.available:
+            messages.error(
+                request,
+                spec.unavailable_because if spec else f"“{route}” is not a route.",
+            )
+            return redirect(reverse("ops-sources"))
+
+        config = _config_from(request, spec)
+        problem = registry.config_problem(route, config)
+        if problem:
+            # Refused rather than saved-and-broken: a source that collects
+            # nothing is indistinguishable from a quiet week.
+            messages.error(request, problem)
+            return redirect(reverse("ops-sources"))
+
+        policy = _policy_from(request)
+        if policy is None:
+            messages.error(
+                request,
+                "Choose the access basis this source collects under. PRD §7.2: no "
+                "connector runs without one, so a source saved without it would "
+                "never collect.",
+            )
+            return redirect(reverse("ops-sources"))
+
+        # Checked here as well as filtered in the form. A dropdown that only
+        # offers the right answers is a convenience; this is the rule.
+        if policy not in registry.policies_for(route, [policy]):
+            messages.error(
+                request,
+                f"{policy.provider.name} does not collect {spec.label.lower()} "
+                f"sources. The access basis has to be the one belonging to the "
+                f"vendor that actually fetches this, or the record is wrong in a "
+                f"way nothing later would catch.",
+            )
+            return redirect(reverse("ops-sources"))
+
+        if Source.objects.filter(name=name).exists():
+            messages.error(request, f"A source is already called “{name}”.")
+            return redirect(reverse("ops-sources"))
+
+        source = Source.objects.create(
+            name=name,
+            route=route,
+            config=config,
+            policy=policy,
+            poll_interval_minutes=_interval_from(request),
+        )
+        _audit_source(request, source, "added")
+        messages.success(
+            request,
+            f"{name} added. It will be collected within the hour and then on its "
+            f"own schedule — or poll it now from its page.",
+        )
+        return redirect(reverse("ops-source", args=[source.pk]))
+
+
+class SourceDetailView(View):
+    """One source: change what it watches, how often, and whether it runs."""
+
+    def get(self, request, pk: int):
+        _require_platform_admin(request)
+        source = get_object_or_404(Source, pk=pk)
+        spec = registry.spec_for(source.route)
+
+        return render(
+            request,
+            "ops/sources/source.html",
+            {
+                "source": source,
+                "spec": spec,
+                "values": _values_for(spec, source.config),
+                "problem": registry.config_problem(source.route, source.config),
+                "policies": registry.policies_for(source.route, _live_policies()),
+            },
+        )
+
+    def post(self, request, pk: int):
+        _require_platform_admin(request)
+        source = get_object_or_404(Source, pk=pk)
+        action = request.POST.get("action") or "save"
+
+        if action == "pause":
+            source.status = Source.Status.FAILED
+            source.save(update_fields=["status"])
+            _audit_source(request, source, "paused")
+            messages.info(request, f"{source.name} paused. Nothing will be collected from it.")
+            return redirect(reverse("ops-source", args=[pk]))
+
+        if action == "resume":
+            source.status = Source.Status.ACTIVE
+            source.save(update_fields=["status"])
+            _audit_source(request, source, "resumed")
+            messages.success(request, f"{source.name} is collecting again.")
+            return redirect(reverse("ops-source", args=[pk]))
+
+        if action == "poll":
+            if not source.can_collect:
+                messages.error(
+                    request,
+                    f"{source.name} cannot collect: "
+                    + ("it is paused. " if source.status == Source.Status.FAILED else "")
+                    + ("it has no live access basis." if not (source.policy and source.policy.is_live) else ""),
+                )
+                return redirect(reverse("ops-source", args=[pk]))
+            # By name, not by import: `apps.evidence` sits above `apps.sources`
+            # in the layer contract. This is the same seam `apps/evidence/tasks.py`
+            # uses to reach enrichment — the queue is the boundary, so a task can
+            # be dispatched upward without the dependency travelling with it.
+            from celery import current_app
+
+            current_app.send_task(
+                "apps.evidence.tasks.poll_source", args=[source.pk], queue="ingest"
+            )
+            messages.info(
+                request,
+                f"Polling {source.name} now. New items appear within a minute or two; "
+                f"what arrives is screened for relevance before anything is transcribed.",
+            )
+            return redirect(reverse("ops-source", args=[pk]))
+
+        # Save.
+        spec = registry.spec_for(source.route)
+        if spec is None or not spec.available:
+            messages.error(request, "This source's route can no longer be configured.")
+            return redirect(reverse("ops-source", args=[pk]))
+
+        config = _config_from(request, spec)
+        problem = registry.config_problem(source.route, config)
+        if problem:
+            messages.error(request, problem)
+            return redirect(reverse("ops-source", args=[pk]))
+
+        policy = _policy_from(request) or source.policy
+        source.config = config
+        source.policy = policy
+        source.poll_interval_minutes = _interval_from(request)
+        source.name = (request.POST.get("name") or source.name).strip()
+        source.save(update_fields=["config", "policy", "poll_interval_minutes", "name"])
+        _audit_source(request, source, "changed")
+        messages.success(request, f"{source.name} saved.")
+        return redirect(reverse("ops-source", args=[pk]))
+
+
+def _config_from(request, spec) -> dict:
+    """Form fields back into the JSON the collector reads.
+
+    List fields are one comma-separated input. Asking an operator to type JSON
+    into a form makes them responsible for the schema, and a trailing comma
+    becomes a 500.
+    """
+    config: dict = {}
+    for field in spec.fields:
+        raw = (request.POST.get(f"config_{field.key}") or "").strip()
+        if not raw:
+            continue
+        if field.is_list:
+            values = [part.strip() for part in raw.split(",") if part.strip()]
+            if values:
+                config[field.key] = values
+        else:
+            config[field.key] = raw
+    return config
+
+
+def _values_for(spec, config: dict) -> list[dict]:
+    """The stored config rendered back into form values."""
+    if spec is None:
+        return []
+    rendered = []
+    for field in spec.fields:
+        value = (config or {}).get(field.key)
+        if field.is_list and isinstance(value, list):
+            value = ", ".join(value)
+        rendered.append({"field": field, "value": value or ""})
+    return rendered
+
+
+def _interval_from(request) -> int:
+    """Hours in the form, minutes in the database.
+
+    Zero is meaningful and kept: it means "never automatically", which is how a
+    source polled only by hand behaves.
+    """
+    try:
+        hours = max(0, min(24 * 30, int(request.POST.get("interval_hours") or 24)))
+    except (TypeError, ValueError):
+        hours = 24
+    return hours * 60
+
+
+def _policy_from(request):
+    policy_id = request.POST.get("policy")
+    if not policy_id:
+        return None
+    policy = ProviderPolicyVersion.objects.filter(pk=policy_id).first()
+    return policy if policy is not None and policy.is_live else None
+
+
+def _live_policies() -> list:
+    return [
+        policy
+        for policy in ProviderPolicyVersion.objects.select_related("provider").all()
+        if policy.is_live
+    ]
+
+
+def _audit_source(request, source, action: str) -> None:
+    AuditEvent.objects.create(
+        kind=AuditEvent.Kind.CONFIG,
+        actor_realm=AuditEvent.Realm.OPERATOR,
+        actor_id=getattr(request.user, "pk", None),
+        actor_label=getattr(request.user, "email", str(request.user)),
+        message=f"Source {source.name} {action}",
+        context={
+            "source_id": source.pk,
+            "route": source.route,
+            "action": action,
+            "config_keys": sorted(source.config or {}),
+            "poll_interval_minutes": source.poll_interval_minutes,
+        },
+    )

@@ -37,6 +37,16 @@ dependencies = [
     # (`messages.parse`), which is what keeps malformed claims out of the
     # database rather than parsing JSON and hoping.
     "pydantic>=2.7",
+    # Export. PRD §14 requires a brief to export to Markdown and DOCX; with no
+    # client portal, a file IS how an output reaches a client, so these are the
+    # last mile rather than a convenience.
+    #
+    # WeasyPrint needs system libraries (pango, cairo, gdk-pixbuf) AND a font
+    # package — see deploy/Dockerfile. Both renderers are imported lazily by
+    # `apps/outputs/exports/__init__.py`, so a machine without them loses two
+    # formats rather than the module.
+    "python-docx>=1.1",
+    "weasyprint>=62.0",
 ]
 
 [build-system]

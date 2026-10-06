@@ -20,3 +20,7 @@ cookies.txt
 
 # Build artifact from `pip install -e .`
 *.egg-info/
+# Client profile files for `manage.py client_profile load`. These carry a
+# client's product range, priorities and named competitors — commercial context,
+# not secrets, but this repository is public. Keep them beside the deployment.
+profiles/

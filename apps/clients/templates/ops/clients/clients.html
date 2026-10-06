@@ -1,0 +1,56 @@
+{% extends "ops/base.html" %}
+{% comment %}
+The client list, which also creates one. A separate add-a-client screen would be
+a page to maintain and a click to make, for two fields.
+{% endcomment %}
+{% block title %}Clients{% endblock %}
+
+{% block content %}
+  <h1>Clients</h1>
+  <p class="lede">
+    Each client is scored separately against the same shared evidence. What makes
+    their results differ is their profile.
+  </p>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Client</th><th>Profile</th><th>Drafts</th><th>Contacts</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for row in clients %}
+          <tr>
+            <td>
+              <a href="{% url 'ops-client' row.obj.slug %}"><span class="name">{{ row.obj.name }}</span></a>
+              {% if row.obj.is_fixture %}<span class="pill">fixture</span>{% endif %}
+            </td>
+            <td>
+              {% if row.profile %}
+                <span class="pill live">v{{ row.profile.number }} live</span>
+              {% else %}
+                <span class="empty">none yet</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ row.drafts }}</td>
+            <td class="muted">{{ row.contacts }}</td>
+            <td class="muted">{{ row.obj.get_status_display }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">No clients yet. Add the first one below.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <span class="name">Add a client</span>
+    <form method="post" action="{% url 'ops-clients' %}">
+      {% csrf_token %}
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" placeholder="Jarrow Formulas" required>
+      <label for="slug">Short name, used in the address</label>
+      <input type="text" id="slug" name="slug" placeholder="leave blank to build one from the name">
+      <div class="actions"><button type="submit">Add</button></div>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,88 @@
+{% extends "ops/base.html" %}
+{% comment %}
+One client, and every action from one page. The operator should not have to
+remember which screen does what.
+{% endcomment %}
+{% block title %}{{ organization.name }}{% endblock %}
+
+{% block content %}
+  <h1>{{ organization.name }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-clients' %}">← All clients</a> ·
+    <a href="{% url 'ops-client-contacts' organization.slug %}">Contacts ({{ contacts|length }})</a>
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Profile</span>
+      {% if profile %}
+        <span class="state stored">v{{ profile.number }} live</span>
+      {% else %}
+        <span class="state missing">none — this client cannot be scored yet</span>
+      {% endif %}
+    </div>
+
+    {% if profile %}
+      <p class="note">
+        {{ profile.assets.count }} asset(s), {{ profile.terms.count }} audience/priority/competitor
+        term(s).{% if profile.label %} {{ profile.label }}.{% endif %}
+      </p>
+      <div class="actions">
+        <a href="{% url 'ops-client-profile' organization.slug profile.number %}">
+          <button type="button" class="secondary">View v{{ profile.number }}</button>
+        </a>
+        <a href="{% url 'ops-client-relevance' organization.slug %}">
+          <button type="button">Relevance &amp; scoring</button>
+        </a>
+        <form method="post" action="{% url 'ops-client-profile-draft' organization.slug %}">
+          {% csrf_token %}<button type="submit" class="secondary">Draft a new version</button>
+        </form>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <span class="name">Read their storefront</span>
+    <p class="note">
+      Reads the product catalogue and drafts a profile from it — the products,
+      the words people would say for them, and the category. It never activates
+      what it finds: a shop says what a client sells, not which product carries
+      the margin or who they sell to.
+    </p>
+    <form method="post" action="{% url 'ops-client-discover' organization.slug %}">
+      {% csrf_token %}
+      <label for="store_url">Storefront address</label>
+      <input type="text" id="store_url" name="store_url" placeholder="https://example.com" required>
+      <div class="actions"><button type="submit">Read it</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <span class="name">Profile versions</span>
+    <table>
+      <thead><tr><th>Version</th><th>Label</th><th>Contents</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        {% for version in versions %}
+          <tr>
+            <td>
+              v{{ version.number }}
+              {% if version.is_current %}<span class="pill live">live</span>{% endif %}
+            </td>
+            <td class="muted">{{ version.label|default:"—" }}</td>
+            <td class="muted">{{ version.assets.count }} assets · {{ version.terms.count }} terms</td>
+            <td class="muted">{{ version.created_at|date:"j M Y, H:i" }}</td>
+            <td>
+              <a href="{% url 'ops-client-profile' organization.slug version.number %}">
+                {% if version.is_current %}view{% else %}review{% endif %}
+              </a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">
+            No profile yet. Read their storefront above, or draft one by hand.
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

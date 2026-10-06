@@ -1,0 +1,71 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Who receives this client's work. A separate screen from the profile on purpose:
+contacts are current-state operational data, the profile is a historical record
+outputs cite, so adding an address must not mint a profile version.
+{% endcomment %}
+{% block title %}{{ organization.name }} · contacts{% endblock %}
+
+{% block content %}
+  <h1>Contacts</h1>
+  <p class="lede">
+    <a href="{% url 'ops-client' organization.slug %}">← {{ organization.name }}</a> ·
+    Everyone here with “receives outputs” on is sent the document when you deliver one.
+  </p>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Name</th><th>Address</th><th>Role</th><th>Receives</th><th></th></tr></thead>
+      <tbody>
+        {% for contact in contacts %}
+          <tr{% if not contact.is_active %} class="muted"{% endif %}>
+            <td>{{ contact.name }}{% if not contact.is_active %} <span class="pill">removed</span>{% endif %}</td>
+            <td class="muted">{{ contact.email }}</td>
+            <td class="muted">{{ contact.role|default:"—" }}</td>
+            <td>
+              {% if contact.receives_outputs %}
+                <span class="state stored">yes</span>
+              {% else %}
+                <span class="state missing">no</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if contact.is_active %}
+                <form method="post" class="inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="pk" value="{{ contact.pk }}">
+                  <button type="submit" name="action" value="contact.toggle" class="small secondary">
+                    {% if contact.receives_outputs %}Stop sending{% else %}Start sending{% endif %}
+                  </button>
+                  <button type="submit" name="action" value="contact.deactivate" class="small danger">
+                    Remove
+                  </button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">
+            Nobody yet. A delivery with no recipients is refused rather than
+            reported as sent, so add at least one before delivering.
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <span class="name">Add a contact</span>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="contact.add">
+      <label for="cname">Name</label>
+      <input type="text" id="cname" name="name" required>
+      <label for="cemail">Address</label>
+      <input type="text" id="cemail" name="email" required>
+      <label for="crole">Role, if it helps</label>
+      <input type="text" id="crole" name="role" placeholder="Head of brand">
+      <div class="actions"><button type="submit">Add</button></div>
+    </form>
+  </div>
+{% endblock %}

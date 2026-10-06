@@ -3,8 +3,10 @@
 # Each check is its own step and runs even if an earlier one failed, so one red
 # run shows every problem at once rather than only the first.
 #
-# The older suites under tests/ do not collect yet (stale imports and
-# NotImplementedError fixtures), so only the portal tests listed below run.
+# The suites under tests/ DO collect and assert — the fixtures that used to
+# raise NotImplementedError are long gone. The final step below runs the
+# deployment-blocking ones and asserts they collected, because a suite that
+# silently matched nothing reports green too.
 
 name: ci
 

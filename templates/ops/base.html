@@ -74,7 +74,18 @@ is a screen that cannot be fixed from an SSH session at 2am.
 <body>
   <header>
     <b>Trend Engine</b>
-    <span>Operations</span>
+    <nav>
+      <a href="{% url 'ops-clients' %}">Clients</a>
+      <a href="{% url 'ops-sources' %}">Sources</a>
+      <a href="{% url 'ops-providers' %}">Vendor keys</a>
+    </nav>
+    {% if user.is_authenticated %}
+      <form method="post" action="{% url 'ops-logout-form' %}" class="signout">
+        {% csrf_token %}
+        <span>{{ user.email }}</span>
+        <button type="submit">Sign out</button>
+      </form>
+    {% endif %}
   </header>
   <main>
     {% if messages %}

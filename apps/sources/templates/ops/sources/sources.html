@@ -1,0 +1,130 @@
+{% extends "ops/base.html" %}
+{% comment %}
+The source registry. Every row says whether it can actually collect, because a
+source with the wrong config saves perfectly and then returns nothing forever —
+which looks like a quiet category rather than a broken source.
+{% endcomment %}
+{% block title %}Sources{% endblock %}
+
+{% block content %}
+  <h1>Sources</h1>
+  <p class="lede">
+    What is watched, and how often. Evidence collected here is shared by every
+    client — what differs per client is which of it ends up in their brief.
+    <a href="{% url 'ops-providers' %}">Vendor keys →</a>
+  </p>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Source</th><th>Watching</th><th>Every</th><th>Last collected</th><th>State</th></tr>
+      </thead>
+      <tbody>
+        {% for row in sources %}
+          <tr>
+            <td>
+              <a href="{% url 'ops-source' row.obj.pk %}"><span class="name">{{ row.obj.name }}</span></a>
+              <div class="note" style="margin-top:2px">{{ row.obj.get_route_display }}</div>
+            </td>
+            <td class="muted">
+              {{ row.summary|default:"—" }}
+              {% if row.problem %}
+                <div class="state unreadable" style="margin-top:3px">{{ row.problem }}</div>
+              {% endif %}
+            </td>
+            <td class="muted">
+              {% if row.obj.poll_interval_minutes %}
+                {% widthratio row.obj.poll_interval_minutes 60 1 %}h
+              {% else %}
+                by hand
+              {% endif %}
+            </td>
+            <td class="muted">
+              {% if row.obj.last_success_at %}
+                {{ row.obj.last_success_at|date:"j M, H:i" }}
+              {% elif row.obj.last_polled_at %}
+                <span class="state unreadable">tried {{ row.obj.last_polled_at|date:"j M, H:i" }}, failed</span>
+              {% else %}
+                never
+              {% endif %}
+            </td>
+            <td>
+              {% if row.obj.can_collect %}
+                <span class="state stored">collecting</span>
+              {% elif not row.obj.policy %}
+                <span class="state unreadable">no access basis</span>
+              {% elif row.obj.status == "failed" %}
+                <span class="state missing">paused</span>
+              {% else %}
+                <span class="state unreadable">blocked</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">Nothing is being watched yet. Add the first source below.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <span class="name">Watch something new</span>
+    {% if not policies %}
+      <p class="note" style="color:var(--bad)">
+        No approved access basis exists, so nothing can be added. PRD §7.2: a
+        connector cannot run without a recorded one. Record and approve a policy
+        for the vendor first.
+      </p>
+    {% else %}
+      {% for entry in specs %}{% with spec=entry.spec %}
+        <form method="post" action="{% url 'ops-sources' %}" style="margin-top:18px">
+          {% csrf_token %}
+          <input type="hidden" name="route" value="{{ spec.route }}">
+          <div class="row">
+            <span class="name">{{ spec.label }}</span>
+          </div>
+          <p class="note" style="margin-top:2px">{{ spec.blurb }}</p>
+
+          <label for="{{ spec.route }}-name">A name you will recognise</label>
+          <input type="text" id="{{ spec.route }}-name" name="name"
+                 placeholder="{{ spec.label }} — {% if spec.route == 'podcast' %}The Peter Attia Drive{% else %}supplements search{% endif %}" required>
+
+          {% for field in spec.fields %}
+            <label for="{{ spec.route }}-{{ field.key }}">{{ field.label }}</label>
+            <input type="text" id="{{ spec.route }}-{{ field.key }}"
+                   name="config_{{ field.key }}" placeholder="{{ field.placeholder }}">
+            {% if field.help %}<p class="note" style="margin-top:3px">{{ field.help }}</p>{% endif %}
+          {% endfor %}
+
+          <label for="{{ spec.route }}-interval">Check every (hours) — 0 means only when you ask</label>
+          <input type="number" id="{{ spec.route }}-interval" name="interval_hours"
+                 value="{% if spec.route == 'podcast' %}168{% else %}24{% endif %}" min="0" max="720">
+
+          <label for="{{ spec.route }}-policy">Access basis</label>
+          {% if entry.policies %}
+            <select id="{{ spec.route }}-policy" name="policy" required>
+              {% for policy in entry.policies %}
+                <option value="{{ policy.pk }}">{{ policy.provider.name }} {{ policy.version }}</option>
+              {% endfor %}
+            </select>
+            <div class="actions"><button type="submit">Add this {{ spec.label|lower }}</button></div>
+          {% else %}
+            <p class="note" style="color:var(--bad)">
+              No approved access basis exists for the vendor that collects
+              {{ spec.label|lower }} sources, so none can be added yet.
+            </p>
+          {% endif %}
+        </form>
+      {% endwith %}{% endfor %}
+    {% endif %}
+  </div>
+
+  {% if blocked %}
+    <div class="card">
+      <span class="name">Not available</span>
+      {% for spec in blocked %}
+        <p class="note"><b>{{ spec.label }}.</b> {{ spec.unavailable_because }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}

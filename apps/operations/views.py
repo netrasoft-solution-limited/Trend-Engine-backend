@@ -42,10 +42,12 @@ public = method_decorator(login_not_required, name="dispatch")
 def _home() -> str:
     """Where a signed-in operator lands.
 
-    The Triage home (PRD §6.5) has no server-rendered view yet, so this points
-    at the one operator screen that exists. It moves when Triage does.
+    The client list, because that is where the work starts: you cannot score,
+    draft or deliver anything for a client the system has no profile for. It
+    used to be the provider-credentials screen, which was simply the only
+    screen that existed. Triage (PRD §6.5) takes this over when it is built.
     """
-    return reverse("ops-providers")
+    return reverse("ops-clients")
 
 
 @public

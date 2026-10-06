@@ -41,6 +41,7 @@ app.conf.task_routes = {
     # these fall through to `default`, where they would sit behind exports.
     "apps.evidence.tasks.*": {"queue": "ingest"},
     "apps.enrichment.tasks.*": {"queue": "enrich"},
+    "apps.clients.tasks.*": {"queue": "default"},
     "apps.outputs.tasks.*": {"queue": "default"},
     "apps.publication.tasks.*": {"queue": "default"},
     "apps.operations.tasks.*": {"queue": "default"},
@@ -77,6 +78,19 @@ app.conf.beat_schedule = {
         "task": "apps.enrichment.tasks.assess_pending",
         "schedule": crontab(minute="*/30"),
     },
+    # Arch §11.3. 03:00 UTC is after the night's ingestion has settled and well
+    # before anyone is working.
+    "nightly-backup": {
+        "task": "apps.operations.tasks.nightly_backup",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    # Sunday 04:00, an hour behind the backup so it tests a dump taken that
+    # same night rather than one six days old. "An untested backup is not a
+    # backup, and this is an explicit acceptance criterion."
+    "weekly-restore-test": {
+        "task": "apps.operations.tasks.restore_test",
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
+    },
 }
 
 # ── Scheduled but not yet implemented ───────────────────────────────────────
@@ -87,5 +101,3 @@ app.conf.beat_schedule = {
 #
 #   apps.evidence.tasks.poll_deletions         daily 03:30    (PRD §7.2)
 #   apps.operations.tasks.refresh_cost_ledger  hourly
-#   apps.operations.tasks.nightly_backup       daily 03:00    (scripts/backup.sh)
-#   apps.operations.tasks.restore_test         weekly         (Arch §11.3)

@@ -75,3 +75,14 @@ def send_password_reset_email(user, *, uid: str, token: str) -> None:
         recipient_list=[user.email],
         fail_silently=False,
     )
+
+
+# Publication and withdrawal notices used to live here, addressed to
+# `OrgUser` rows reached through `OrgMembership`. They moved to
+# `apps.publication.notifications` when the portal was mothballed: with no
+# client logins there are no OrgUsers, and the recipient list is now
+# `apps.clients.contacts`, which the gate can read directly.
+#
+# What is left here is the mail the TENANT PLANE itself sends — invitations
+# and password resets. Those belong to a login flow, so if the portal ever
+# comes back they come back with it, unchanged.

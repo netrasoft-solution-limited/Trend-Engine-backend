@@ -179,7 +179,34 @@ def test_the_methodology_section_names_its_sources_and_its_limits(item):
 
     assert "Magnesium and sleep" in body, "the episode is listed"
     assert "sponsor" in body.lower(), "the exclusion is declared"
-    assert "not yet built" in body, "the absence of scoring is admitted, not hidden"
+    assert "not tailored" in body, "an untailored brief must say so"
+
+
+def test_a_tailored_brief_names_the_profile_it_was_built_from(item):
+    """PRD §8: every output records exactly one client-profile version. A brief
+    that cannot say which profile selected its claims cannot be explained after
+    the profile changes."""
+    claim(item)
+
+    body = text_of(
+        drafting.sections_from_claims(profile_label="v3"), "What this is based on"
+    )
+
+    assert "v3" in body
+    assert "another client's brief" in body, "the reader is told it is client-specific"
+
+
+def test_a_tailored_brief_still_admits_what_its_ordering_misses(item):
+    """Tailoring is not the same as knowing what is moving. Claiming the first
+    implies the second unless it is said plainly."""
+    claim(item)
+
+    body = text_of(
+        drafting.sections_from_claims(profile_label="v1"), "What this is based on"
+    )
+
+    assert "28-day baseline" in body
+    assert "a long-standing topic and a breaking one rank" in body
 
 
 def test_nothing_to_draft_from_still_returns_a_methodology_section(item):

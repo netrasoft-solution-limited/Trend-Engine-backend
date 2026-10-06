@@ -27,7 +27,7 @@ from django.utils import timezone
 from apps.operations.models import AuditEvent
 from apps.outputs.models import Output, OutputState, OutputVersion
 
-from . import signals
+from . import notifications, signals
 from .models import Publication
 
 
@@ -110,7 +110,11 @@ def publish(*, version: OutputVersion, organization, actor_label: str) -> Public
         summary=version.summary,
         body=version.body,
         published_by_label=actor_label,
-        notified_at=now,
+        # Left NULL. It used to be set here, which was already optimistic — it
+        # recorded an intention to notify rather than a notification. Now that
+        # publishing does not email the client at all (see `notifications`),
+        # setting it would be plainly false. `delivery.deliver()` stamps it when
+        # the document actually goes out, which is the only moment it is true.
     )
 
     output.state = OutputState.PUBLISHED
@@ -168,6 +172,14 @@ def unpublish(*, publication: Publication, actor_label: str, reason: str) -> Non
     )
 
     signals.unpublished.send(sender=Publication, publication=publication, reason=reason)
+
+    # Called directly, not through the signal. The signal exists so that layers
+    # ABOVE this one can react; the client notice is this layer's own
+    # responsibility and must not depend on a receiver having been connected.
+    #
+    # After the commit: the withdrawal is already recorded by the time anyone is
+    # told, and a mail outage must not roll back a withdrawal that has happened.
+    transaction.on_commit(lambda: notifications.send_withdrawal_email(publication))
 
 
 def published_for(organization=None):

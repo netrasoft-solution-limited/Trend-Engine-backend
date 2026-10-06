@@ -1,0 +1,110 @@
+{% comment %}
+The client-facing document, and the source PDF is printed from.
+
+Deliberately NOT extending `ops/base.html`. That shell uses
+`prefers-color-scheme` and `color-mix()`, neither of which WeasyPrint handles
+usefully, and a document going to a client must not inherit operator chrome —
+the nav, the sign-out button, the operator's own email address.
+
+CSS is inline for the same reason the operator shell's is: a worker rendering a
+PDF has no static-file pipeline, and a stylesheet that resolves in development
+and 404s in a container is a failure that only shows up in the artefact.
+{% endcomment %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+{% comment %}WeasyPrint reads these into the PDF's /CreationDate and /ModDate. Without
+them it stamps the clock, and two PDFs of one publication differ for no reason —
+which makes ExportArtifact.sha256 worthless.{% endcomment %}
+<meta name="dcterms.created" content="{{ document.metadata_date }}">
+<meta name="dcterms.modified" content="{{ document.metadata_date }}">
+<title>{{ document.title }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 20mm 20mm;
+    @bottom-center { content: counter(page); font: 9pt Georgia, serif; color: #6b6864; }
+  }
+  html { font-size: 11pt; }
+  /* `@page` margins apply only when printing, so on screen the same file would
+     open edge-to-edge. Scoped to screen so the PDF keeps its page margins and
+     does not get these on top of them. */
+  @media screen {
+    body { max-width: 46em; margin: 0 auto; padding: 36px 26px 72px; }
+  }
+  body {
+    margin: 0;
+    font-family: Georgia, "DejaVu Serif", serif;
+    line-height: 1.5;
+    color: #1c1b19;
+    background: #fff;
+  }
+  .notice {
+    border: 1.5pt solid #a32b20;
+    color: #a32b20;
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    font-weight: bold;
+    letter-spacing: .08em;
+    padding: 7pt 10pt;
+    margin-bottom: 16pt;
+    text-align: center;
+  }
+  h1 { font-size: 21pt; line-height: 1.15; margin: 0 0 6pt; }
+  .meta {
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    color: #6b6864;
+    margin: 0 0 20pt;
+    padding-bottom: 10pt;
+    border-bottom: .5pt solid #d9d6d0;
+  }
+  .summary { font-size: 12pt; margin: 0 0 20pt; }
+  h2 {
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 12pt;
+    margin: 20pt 0 7pt;
+    /* Never leave a heading alone at the foot of a page. */
+    page-break-after: avoid;
+  }
+  p { margin: 0 0 9pt; orphans: 2; widows: 2; }
+  ul { margin: 0 0 9pt; padding-left: 16pt; }
+  li { margin-bottom: 4pt; }
+  .provenance {
+    margin-top: 22pt;
+    padding-top: 9pt;
+    border-top: .5pt solid #d9d6d0;
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 8.5pt;
+    color: #6b6864;
+  }
+</style>
+</head>
+<body>
+  {% if document.is_draft %}<div class="notice">{{ document.notice }}</div>{% endif %}
+
+  <h1>{{ document.title }}</h1>
+  <p class="meta">
+    {{ document.type_label }} · Prepared for {{ document.organization_name }}{% if document.dated %} · {{ document.dated|date:"j F Y" }}{% endif %}
+  </p>
+
+  {% if document.summary %}<p class="summary">{{ document.summary }}</p>{% endif %}
+
+  {% for section in document.sections %}
+    <h2>{{ section.heading }}</h2>
+    {% for block in section.blocks %}
+      {% if block.is_bullets %}
+        <ul>{% for item in block.items %}<li>{{ item }}</li>{% endfor %}</ul>
+      {% else %}
+        <p>{{ block.text }}</p>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+  {% if not document.provenance.is_empty %}
+    <p class="provenance">
+      Built from{% if document.provenance.client_profile_version %} client profile {{ document.provenance.client_profile_version }}{% endif %}{% if document.provenance.domain_pack_version %}{% if document.provenance.client_profile_version %},{% endif %} domain pack {{ document.provenance.domain_pack_version }}{% endif %}.
+    </p>
+  {% endif %}
+</body>
+</html>

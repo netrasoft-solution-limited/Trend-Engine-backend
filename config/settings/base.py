@@ -160,6 +160,22 @@ STORAGES = {
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 }
 
+# ── Off-box backups (Arch §11.3) ────────────────────────────────────────────
+# An on-box backup protects against a bad migration. It does not protect
+# against losing the box, which is the failure mode a single-VPS deployment
+# actually has.
+#
+# Blank is allowed and means "not configured". The task refuses rather than
+# raising at import, so a missing bucket cannot stop the stack from booting —
+# but `apps/operations/backups.py` records the refusal as a failed `BackupRun`,
+# so an unconfigured backup is visible rather than silent.
+BACKUP_TARGET = env("BACKUP_TARGET", "")
+BACKUP_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", "") or None
+#: Dumps older than this are deleted from the bucket by the nightly task.
+#: Object-store versioning (Arch §11.3) is the second line and is configured on
+#: the bucket, not here.
+BACKUP_RETENTION_DAYS = int(env("BACKUP_RETENTION_DAYS", "30"))
+
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]

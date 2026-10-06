@@ -1,0 +1,83 @@
+{% extends "ops/base.html" %}
+{% block title %}{{ source.name }}{% endblock %}
+
+{% block content %}
+  <h1>{{ source.name }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-sources' %}">← Sources</a> · {{ source.get_route_display }}
+  </p>
+
+  {% if problem %}
+    <div class="card" style="border-color:var(--bad)">
+      <p class="note" style="margin-top:0;color:var(--bad)">{{ problem }}</p>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="row">
+      <span class="name">State</span>
+      {% if source.can_collect %}
+        <span class="state stored">collecting</span>
+      {% else %}
+        <span class="state unreadable">not collecting</span>
+      {% endif %}
+    </div>
+    <p class="note">
+      {% if source.last_success_at %}
+        Last collected {{ source.last_success_at|date:"j M Y, H:i" }}.
+      {% elif source.last_polled_at %}
+        Last tried {{ source.last_polled_at|date:"j M Y, H:i" }} and failed.
+      {% else %}
+        Never collected.
+      {% endif %}
+      {% if source.policy %}
+        Access basis: {{ source.policy.provider.name }} {{ source.policy.version }}.
+      {% else %}
+        <b>No access basis recorded, so it cannot collect.</b>
+      {% endif %}
+    </p>
+    <form method="post" class="inline">
+      {% csrf_token %}
+      <button type="submit" name="action" value="poll">Collect now</button>
+      {% if source.status == "failed" %}
+        <button type="submit" name="action" value="resume" class="secondary">Resume</button>
+      {% else %}
+        <button type="submit" name="action" value="pause" class="secondary">Pause</button>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="card">
+    <span class="name">What it watches</span>
+    {% if spec %}<p class="note" style="margin-top:2px">{{ spec.blurb }}</p>{% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save">
+
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" value="{{ source.name }}" required>
+
+      {% for row in values %}
+        <label for="{{ row.field.key }}">{{ row.field.label }}</label>
+        <input type="text" id="{{ row.field.key }}" name="config_{{ row.field.key }}"
+               value="{{ row.value }}" placeholder="{{ row.field.placeholder }}">
+        {% if row.field.help %}<p class="note" style="margin-top:3px">{{ row.field.help }}</p>{% endif %}
+      {% endfor %}
+
+      <label for="interval_hours">Check every (hours) — 0 means only when you ask</label>
+      <input type="number" id="interval_hours" name="interval_hours"
+             value="{% widthratio source.poll_interval_minutes 60 1 %}" min="0" max="720">
+
+      <label for="policy">Access basis</label>
+      <select id="policy" name="policy">
+        {% for policy in policies %}
+          <option value="{{ policy.pk }}" {% if source.policy_id == policy.pk %}selected{% endif %}>
+            {{ policy.provider.name }} {{ policy.version }}
+          </option>
+        {% endfor %}
+      </select>
+
+      <div class="actions"><button type="submit">Save</button></div>
+    </form>
+  </div>
+{% endblock %}

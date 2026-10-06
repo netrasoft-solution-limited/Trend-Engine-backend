@@ -149,3 +149,53 @@ class ExpertReview(TenantScopedModel):
     @property
     def is_signed_off(self) -> bool:
         return self.signed_off_at is not None
+
+
+class ExportArtifact(TenantScopedModel):
+    """A record that a document was rendered — PRD §8, PRD §7.1.
+
+    THE EVENT, NOT THE BYTES. `STORAGES["default"]` is S3 and no bucket or
+    credentials are configured, so a `FileField.save()` here would raise a boto3
+    credentials error inside the delivery transaction. The bytes are in memory
+    for the email anyway, and a file can be re-rendered on demand — which is
+    exactly what `sha256` and `renderer_version` make verifiable.
+
+    THE HASH IS ONLY WORTH STORING BECAUSE THE RENDERERS ARE DETERMINISTIC.
+    `tests/outputs/test_exports.py` asserts byte-equality across renders. Without
+    that, this column would identify a blob nobody has, while looking like
+    evidence — worse than storing nothing. `renderer_version` is what
+    distinguishes "the content changed" from "the template changed" when a
+    regenerated file does not match.
+
+    No FK to `Publication`: that model is a layer above this one. The
+    client-facing fact — who it was sent to — is `publication.Delivery`.
+    """
+
+    class Format(models.TextChoices):
+        PDF = "pdf", "PDF"
+        DOCX = "docx", "Word"
+        HTML = "html", "Web page"
+        MARKDOWN = "markdown", "Markdown"
+        CSV = "csv", "Spreadsheet"
+
+    version = models.ForeignKey(
+        OutputVersion, on_delete=models.CASCADE, related_name="exports"
+    )
+    format = models.CharField(max_length=16, choices=Format.choices)
+    filename = models.CharField(max_length=300)
+    byte_size = models.PositiveIntegerField(default=0)
+    sha256 = models.CharField(max_length=64, db_index=True)
+    renderer_version = models.CharField(max_length=16, default="1")
+    #: Whether the rendered file carried the DRAFT watermark. An export of an
+    #: unpublished version is legitimate — the operator may be reviewing it —
+    #: but it has to be distinguishable afterwards from one that went out.
+    was_draft = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_by_label = models.CharField(max_length=254, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["organization", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.filename} ({self.get_format_display()})"

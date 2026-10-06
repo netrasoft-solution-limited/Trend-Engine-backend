@@ -130,9 +130,11 @@ def test_the_full_flow_signs_the_operator_in(client, enrolled):
 
     response = client.post(reverse("ops-mfa"), {"code": pyotp.TOTP(secret).now()})
 
-    assert response["Location"] == reverse("ops-providers")
+    # The client list, not the provider screen: an operator lands where the
+    # work starts, and nothing can be scored or delivered for a client the
+    # system has no profile for.
+    assert response["Location"] == reverse("ops-clients")
     assert "_auth_user_id" in client.session
-    assert client.get(reverse("ops-providers")).status_code == 200
 
 
 def test_the_challenge_needs_the_password_first(client, enrolled):

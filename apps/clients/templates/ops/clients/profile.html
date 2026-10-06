@@ -1,0 +1,157 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Review and edit one profile version.
+
+Each row is its own form with a hidden `action`, dispatched server-side — the
+same trick the provider screen uses for its "clear" button, widened to a table.
+No JavaScript, so terms are one comma-separated input: it is what an operator
+can paste from a spreadsheet, and it is the shape `client_profile load` accepts.
+{% endcomment %}
+{% block title %}{{ organization.name }} · profile v{{ version.number }}{% endblock %}
+
+{% block content %}
+  <h1>Profile v{{ version.number }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-client' organization.slug %}">← {{ organization.name }}</a>
+    {% if version.is_current %}· <span class="pill live">live</span>{% endif %}
+    {% if version.label %}· {{ version.label }}{% endif %}
+  </p>
+
+  {% if version.is_current %}
+    <div class="card" style="border-color:var(--warn)">
+      <p class="note" style="margin-top:0">
+        <b>This version is live and read-only.</b> Outputs cite the profile they
+        were built from, so changing it would alter what an already-delivered
+        brief claims. Draft a new version from the client page to make changes.
+      </p>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Assets — what they sell</span>
+      <span class="state">{{ assets|length }}</span>
+    </div>
+    <p class="note">
+      The heaviest component of a claim's score. Terms are what a podcast host
+      would <i>say</i> — the ingredient, the abbreviation, the brand's own name.
+    </p>
+    <table>
+      <thead><tr><th>Name</th><th>Kind</th><th>Terms</th><th>Weight</th><th></th></tr></thead>
+      <tbody>
+        {% for asset in assets %}
+          <tr>
+            <td colspan="5">
+              <form method="post" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="pk" value="{{ asset.pk }}">
+                <input type="text" name="name" value="{{ asset.name }}" style="width:200px"
+                       {% if version.is_current %}readonly{% endif %}>
+                <select name="kind" {% if version.is_current %}disabled{% endif %}>
+                  {% for value, label in kinds %}
+                    <option value="{{ value }}" {% if value == asset.kind %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" name="terms" value="{{ asset.terms|join:", " }}" style="flex:1;min-width:220px"
+                       {% if version.is_current %}readonly{% endif %}>
+                <input type="number" name="weight" value="{{ asset.weight }}" min="0" max="100"
+                       {% if version.is_current %}readonly{% endif %}>
+                {% if not version.is_current %}
+                  <button type="submit" name="action" value="asset.save" class="small">Save</button>
+                  <button type="submit" name="action" value="asset.delete" class="small danger"
+                          formnovalidate>Remove</button>
+                {% endif %}
+              </form>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">Nothing yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if not version.is_current %}
+      <form method="post" class="inline" style="margin-top:12px">
+        {% csrf_token %}
+        <input type="text" name="name" placeholder="Magnesium Glycinate" style="width:200px" required>
+        <select name="kind">
+          {% for value, label in kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+        <input type="text" name="terms" placeholder="magnesium, glycinate, mag glycinate"
+               style="flex:1;min-width:220px" required>
+        <input type="number" name="weight" value="50" min="0" max="100">
+        <button type="submit" name="action" value="asset.add" class="small">Add</button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% for key, heading, rows in facets %}
+    <div class="card">
+      <div class="row">
+        <span class="name">{{ heading }}</span>
+        <span class="state">{{ rows|length }}</span>
+      </div>
+      {% if key == "competitor" %}
+        <p class="note">
+          A claim naming a competitor is strategically relevant, so these feed the
+          same component as priorities. They live on the profile rather than with
+          the contacts because a score has to stay explainable against the exact
+          version it was computed from.
+        </p>
+      {% endif %}
+      <table>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                <form method="post" class="inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="pk" value="{{ row.pk }}">
+                  <input type="text" name="name" value="{{ row.name }}" style="width:200px"
+                         {% if version.is_current %}readonly{% endif %}>
+                  <input type="text" name="terms" value="{{ row.terms|join:", " }}"
+                         style="flex:1;min-width:220px" {% if version.is_current %}readonly{% endif %}>
+                  <input type="number" name="weight" value="{{ row.weight }}" min="0" max="100"
+                         {% if version.is_current %}readonly{% endif %}>
+                  {% if not version.is_current %}
+                    <button type="submit" name="action" value="term.save" class="small">Save</button>
+                    <button type="submit" name="action" value="term.delete" class="small danger"
+                            formnovalidate>Remove</button>
+                  {% endif %}
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td class="empty">Nothing yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if not version.is_current %}
+        <form method="post" class="inline" style="margin-top:12px">
+          {% csrf_token %}
+          <input type="hidden" name="facet" value="{{ key }}">
+          <input type="text" name="name" placeholder="Name" style="width:200px" required>
+          <input type="text" name="terms" placeholder="comma, separated, terms"
+                 style="flex:1;min-width:220px" required>
+          <input type="number" name="weight" value="50" min="0" max="100">
+          <button type="submit" name="action" value="term.add" class="small">Add</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  {% if not version.is_current %}
+    <div class="card">
+      <span class="name">Activate</span>
+      <p class="note">
+        Makes this the version new outputs cite. Existing scores stay with the
+        profile they were computed against — score the corpus again afterwards.
+      </p>
+      <form method="post" action="{% url 'ops-client-profile-activate' organization.slug version.number %}">
+        {% csrf_token %}
+        <div class="actions"><button type="submit">Make v{{ version.number }} live</button></div>
+      </form>
+    </div>
+  {% endif %}
+{% endblock %}
