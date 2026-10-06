@@ -37,8 +37,19 @@ logger = logging.getLogger(__name__)
 #: A catalogue read should not become a crawl. Brands with thousands of SKUs
 #: are real, and the profile that matters is the first page or two of them.
 MAX_PRODUCTS = 250
-MAX_SITEMAP_PAGES = 60
+MAX_SITEMAP_PAGES = 140
 TIMEOUT_SECONDS = 20
+
+#: Between page fetches. We are reading someone else's shop a hundred times in
+#: a row, and the launch client's own site answers 429 to an unpaced crawl —
+#: which silently cost us 98 of 104 products, because a rate-limited page is
+#: not an error, it is just a page with no product on it. Politeness here is
+#: both good manners and the difference between a usable profile and a thin one.
+CRAWL_DELAY_SECONDS = 0.4
+
+#: One backoff on 429, then give up on that page. A storefront that is actively
+#: throttling will not be talked round by retrying harder.
+RATE_LIMIT_BACKOFF_SECONDS = 2.0
 
 
 class CatalogueError(RuntimeError):
@@ -92,16 +103,31 @@ def _default_transport():
     forgets to pass a fake fails loudly instead of quietly reaching the
     internet — which is the behaviour we want from a module whose whole job is
     to fetch other people's websites.
+
+    Pacing lives here rather than in the crawl loop on purpose: it is a property
+    of making real network calls, so tests that supply their own transport are
+    not slowed by it and do not have to know it exists.
     """
+    import time
+
     import httpx
 
+    client = httpx.Client(
+        timeout=TIMEOUT_SECONDS,
+        follow_redirects=True,
+        headers={"User-Agent": "TrendEngine/1.0 (+catalogue import)"},
+    )
+    state = {"first": True}
+
     def get(url: str) -> tuple[int, str]:
-        response = httpx.get(
-            url,
-            timeout=TIMEOUT_SECONDS,
-            follow_redirects=True,
-            headers={"User-Agent": "TrendEngine/1.0 (+catalogue import)"},
-        )
+        if not state["first"]:
+            time.sleep(CRAWL_DELAY_SECONDS)
+        state["first"] = False
+
+        response = client.get(url)
+        if response.status_code == 429:
+            time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+            response = client.get(url)
         return response.status_code, response.text
 
     return get
