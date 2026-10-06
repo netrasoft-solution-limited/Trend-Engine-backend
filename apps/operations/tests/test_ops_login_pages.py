@@ -238,3 +238,18 @@ def test_a_signed_in_platform_admin_reaches_the_credentials_screen(client, enrol
 
     assert response.status_code == 200
     assert b"Provider credentials" in response.content
+
+
+def test_the_bare_origin_does_not_404(client, enrolled):
+    """Typing the hostname from a message is how most people arrive. A 404
+    there reads as "the thing is broken" rather than "you need a path"."""
+    response = client.get("/")
+
+    assert response.status_code in (301, 302)
+
+
+def test_the_bare_origin_sends_an_anonymous_visitor_to_sign_in(client):
+    first = client.get("/")
+
+    assert first.status_code in (301, 302)
+    assert "login" in client.get("/", follow=True).redirect_chain[-1][0]

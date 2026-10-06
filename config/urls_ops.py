@@ -10,8 +10,14 @@ Every operator screen from PRD §6.5 lives here. The portal process does not
 import this module.
 """
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 urlpatterns = [
+    # The bare origin. Without this, https://ops.<domain>/ is a 404 — which is
+    # what anyone typing the hostname from a message gets, and it reads as "the
+    # thing is broken" rather than "you need a path". Anonymous visitors are
+    # bounced on to /login by LoginRequiredMiddleware from here.
+    path("", RedirectView.as_view(pattern_name="ops-clients", permanent=False)),
     # The JSON API for the React ops client, at this origin's root.
     path("api/auth/", include("apps.operations.api_urls")),
     # Server-rendered sign-in at the origin root. LOGIN_URL points at /login,
