@@ -232,8 +232,17 @@ def _from_jsonld(origin: str, get) -> list[Product]:
 
     pages = [u for u in locations if "/product" in u.lower() and not _is_sitemap(u)]
     products: list[Product] = []
+    blocked = 0
     for url in pages[:MAX_SITEMAP_PAGES]:
         status, html = get(url)
+        if status in (403, 429):
+            # Counted, not just skipped. A throttled page is not an error — it
+            # is a page with no product on it — so without this the import
+            # SUCCEEDS and returns a fraction of the range. The launch client's
+            # own site answers 429 to 7 pages in 8, which would have produced a
+            # confident profile built from 8 of 104 products.
+            blocked += 1
+            continue
         if status != 200:
             continue
         for block in _LD_BLOCK.findall(html):
@@ -253,8 +262,20 @@ def _from_jsonld(origin: str, get) -> list[Product]:
                         url=url,
                     )
                 )
+    if blocked > len(products):
+        raise CatalogueError(
+            f"{origin} is rate-limiting us: {blocked} of "
+            f"{min(len(pages), MAX_SITEMAP_PAGES)} product pages were refused and only "
+            f"{len(products)} could be read. A profile built from that fraction of the "
+            f"range would look complete and would not be. Write the profile by hand, or "
+            f"ask the client for their product list — they have one."
+        )
+
     if products:
-        logger.info("Read %d products from %s via JSON-LD", len(products), origin)
+        logger.info(
+            "Read %d products from %s via JSON-LD (%d pages refused)",
+            len(products), origin, blocked,
+        )
     return products
 
 
@@ -274,6 +295,12 @@ def read(store_url: str, *, transport=None) -> list[Product]:
     for route in (_from_shopify, _from_jsonld):
         try:
             found = route(origin, get)
+        except CatalogueError:
+            # A deliberate refusal, not a route that happened to break — a
+            # throttled crawl knows something the generic message below does
+            # not, and swallowing it here would replace "they are rate-limiting
+            # us, write the profile by hand" with "we could not read anything".
+            raise
         except Exception as exc:  # noqa: BLE001 — one dead route is not fatal
             logger.warning("Catalogue route %s failed for %s: %s", route.__name__, origin, exc)
             continue

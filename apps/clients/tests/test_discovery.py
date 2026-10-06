@@ -397,3 +397,48 @@ def test_xml_escaped_urls_are_unescaped_before_being_requested():
 
     assert "https://brand.example/sitemap_products_1.xml?a=1&b=2" in asked
     assert not any("&amp;" in url for url in asked)
+
+
+def test_a_throttled_crawl_refuses_rather_than_returning_a_fraction():
+    """The launch client's storefront answers 429 to most pages. A throttled
+    page is not an error — it is a page with no product on it — so without a
+    count the import succeeds and builds a confident profile from 8 of 104
+    products. That is the failure this whole module keeps producing in
+    different forms: something that looks complete and is not."""
+    pages = {
+        "https://brand.example/products.json?limit=250": (429, ""),
+        "https://brand.example/sitemap.xml": (
+            200,
+            "<urlset>"
+            + "".join(
+                f"<url><loc>https://brand.example/products/p{n}</loc></url>" for n in range(6)
+            )
+            + "</urlset>",
+        ),
+        "https://brand.example/products/p0": (200, _ld_page("The one that got through")),
+        # The rest are throttled, which is what the real site does.
+        **{f"https://brand.example/products/p{n}": (429, "") for n in range(1, 6)},
+    }
+
+    with pytest.raises(catalogue.CatalogueError, match="rate-limiting us"):
+        catalogue.read("https://brand.example", transport=transport_for(pages))
+
+
+def test_a_mostly_successful_crawl_still_returns_what_it_found():
+    """One blocked page among many must not throw away a good import."""
+    pages = {
+        "https://brand.example/products.json?limit=250": (404, ""),
+        "https://brand.example/sitemap.xml": (
+            200,
+            "".join(
+                f"<url><loc>https://brand.example/products/p{n}</loc></url>" for n in range(3)
+            ),
+        ),
+        "https://brand.example/products/p0": (200, _ld_page("Alpha")),
+        "https://brand.example/products/p1": (200, _ld_page("Beta")),
+        "https://brand.example/products/p2": (429, ""),
+    }
+
+    products = catalogue.read("https://brand.example", transport=transport_for(pages))
+
+    assert sorted(p.name for p in products) == ["Alpha", "Beta"]
