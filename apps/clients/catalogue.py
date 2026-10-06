@@ -25,6 +25,7 @@ reach. Those are commercial decisions and they stay human — see `discovery.py`
 """
 from __future__ import annotations
 
+import html as html_module
 import json
 import logging
 import re
@@ -164,21 +165,46 @@ def _product_nodes(payload) -> list[dict]:
     return [payload] if "Product" in types else []
 
 
+def _locations(body: str) -> list[str]:
+    """Every <loc> in a sitemap, unescaped.
+
+    Sitemaps are XML, so a URL with query parameters arrives with `&` written
+    as `&amp;`. Requesting it unescaped sends a literal "&amp;" and the server
+    returns the wrong page or an error — which presents as "this storefront has
+    no products" rather than as a malformed request.
+    """
+    return [
+        html_module.unescape(loc)
+        for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", body)
+    ]
+
+
+def _is_sitemap(url: str) -> bool:
+    """Checked on the PATH, not the whole URL.
+
+    Shopify's sitemap index points at `sitemap_products_1.xml?from=…&to=…`, so
+    `url.endswith(".xml")` is False and the product index is skipped — the
+    catalogue then reads as empty for one of the most common storefronts there
+    is. Found against a real client's site, which is the only way this surfaces.
+    """
+    return urlparse(url).path.lower().endswith(".xml")
+
+
 def _from_jsonld(origin: str, get) -> list[Product]:
     status, body = get(f"{origin}/sitemap.xml")
     if status != 200:
         return []
 
-    locations = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", body)
+    locations = _locations(body)
     # Nested sitemaps: follow only the ones that look like product indexes,
     # rather than every sitemap a large site publishes.
-    nested = [u for u in locations if u.endswith(".xml") and "product" in u.lower()]
+    nested = [u for u in locations if _is_sitemap(u) and "product" in u.lower()]
     for sub in nested[:3]:
         sub_status, sub_body = get(sub)
         if sub_status == 200:
-            locations.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sub_body))
+            locations.extend(_locations(sub_body))
 
-    pages = [u for u in locations if "/product" in u.lower() and not u.endswith(".xml")]
+    pages = [u for u in locations if "/product" in u.lower() and not _is_sitemap(u)]
     products: list[Product] = []
     for url in pages[:MAX_SITEMAP_PAGES]:
         status, html = get(url)

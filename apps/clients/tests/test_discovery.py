@@ -342,3 +342,58 @@ def test_an_empty_catalogue_is_refused_before_a_model_call(org_a):
     """Paying for a call that can only return nothing."""
     with scoped(org_a), pytest.raises(ValueError, match="empty catalogue"):
         discovery.interpret([])
+
+
+# ── Sitemap shapes that real storefronts actually use ───────────────────────
+#
+# Both of these were found against a live client's site after the code looked
+# correct in tests built from a sitemap I had written myself.
+
+
+def test_a_nested_sitemap_with_a_query_string_is_followed():
+    """Shopify's index points at `sitemap_products_1.xml?from=…&to=…`, so a
+    check of `url.endswith(".xml")` skips the product index and the catalogue
+    reads as empty — for one of the most common storefronts there is."""
+    pages = {
+        "https://brand.example/products.json?limit=250": (429, "rate limited"),
+        "https://brand.example/sitemap.xml": (
+            200,
+            "<sitemapindex><sitemap><loc>"
+            "https://brand.example/sitemap_products_1.xml?from=1&amp;to=9"
+            "</loc></sitemap></sitemapindex>",
+        ),
+        "https://brand.example/sitemap_products_1.xml?from=1&to=9": (
+            200,
+            "<urlset><url><loc>https://brand.example/products/magnesium</loc></url></urlset>",
+        ),
+        "https://brand.example/products/magnesium": (200, _ld_page("Magnesium Optimizer")),
+    }
+
+    products = catalogue.read("https://brand.example", transport=transport_for(pages))
+
+    assert [p.name for p in products] == ["Magnesium Optimizer"]
+
+
+def test_xml_escaped_urls_are_unescaped_before_being_requested():
+    """A sitemap is XML, so `&` arrives as `&amp;`. Requesting it unescaped
+    sends a literal "&amp;" and the server answers something else — which
+    presents as "this storefront has no products"."""
+    asked: list[str] = []
+
+    def get(url):
+        asked.append(url)
+        return {
+            "https://brand.example/products.json?limit=250": (404, ""),
+            "https://brand.example/sitemap.xml": (
+                200,
+                "<urlset><url><loc>"
+                "https://brand.example/sitemap_products_1.xml?a=1&amp;b=2"
+                "</loc></url></urlset>",
+            ),
+        }.get(url, (404, ""))
+
+    with pytest.raises(catalogue.CatalogueError):
+        catalogue.read("https://brand.example", transport=get)
+
+    assert "https://brand.example/sitemap_products_1.xml?a=1&b=2" in asked
+    assert not any("&amp;" in url for url in asked)
