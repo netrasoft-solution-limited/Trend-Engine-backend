@@ -78,3 +78,43 @@ class Publication(TenantScopedModel):
     @property
     def is_live(self) -> bool:
         return self.unpublished_at is None
+
+
+class Delivery(TenantScopedModel):
+    """A publication was sent to named people. The client-facing fact.
+
+    Separate from `outputs.ExportArtifact`, which records that a document was
+    RENDERED. Rendering is internal and happens whenever an operator downloads
+    something; delivery is the moment content leaves for a client, and the two
+    are different audit facts with different consequences. Keeping the recipient
+    list here also puts client PII at L7 beside the gate rather than at L6.
+
+    RECIPIENTS ARE DENORMALISED EMAIL STRINGS, not a relation to
+    `clients.ClientContact`. A delivery record has to survive the contact row
+    being edited or deactivated: "who did this actually go to?" must stay
+    answerable after someone leaves the client's team, and a foreign key would
+    answer it with today's list instead of that day's.
+
+    Not unique per publication — re-delivering to a newly added contact is
+    legitimate, and each attempt is its own row, so the trail shows how many
+    times something went out and to whom.
+    """
+
+    publication = models.ForeignKey(
+        Publication, on_delete=models.PROTECT, related_name="deliveries"
+    )
+    recipients = models.JSONField(default=list)
+    formats = models.JSONField(default=list)
+    #: The covering note the operator wrote, if any. Part of what the client
+    #: received, so it belongs in the record of what was sent.
+    note = models.TextField(blank=True)
+    sent_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    sent_by_label = models.CharField(max_length=254)
+
+    class Meta:
+        ordering = ("-sent_at",)
+        indexes = [models.Index(fields=["organization", "-sent_at"])]
+        verbose_name_plural = "deliveries"
+
+    def __str__(self) -> str:
+        return f"{self.publication_id} to {len(self.recipients)} recipient(s)"

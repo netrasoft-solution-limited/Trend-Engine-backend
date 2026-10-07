@@ -1,0 +1,59 @@
+{% extends "ops/base.html" %}
+{% block title %}Outputs{% endblock %}
+
+{% block content %}
+  <h1>Outputs</h1>
+  <p class="lede">
+    Drafted from a client's own evidence, approved, published, then sent. Those
+    are four separate steps on purpose — nothing reaches a client by accident.
+  </p>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Output</th><th>Client</th><th>Type</th><th>State</th><th>Versions</th></tr></thead>
+      <tbody>
+        {% for row in outputs %}
+          <tr>
+            <td><a href="{% url 'ops-output' row.obj.pk %}">{{ row.obj.title }}</a></td>
+            <td class="muted">{{ row.obj.organization.name }}</td>
+            <td class="muted">{{ row.obj.get_type_display }}</td>
+            <td>
+              {% if row.obj.state == "delivered" %}<span class="state stored">delivered</span>
+              {% elif row.obj.state == "published" %}<span class="state stored">published</span>
+              {% elif row.obj.state == "approved" %}<span class="state env">approved, not sent</span>
+              {% else %}<span class="state missing">{{ row.obj.get_state_display|lower }}</span>{% endif %}
+            </td>
+            <td class="muted">{{ row.versions }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">Nothing drafted yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <span class="name">Draft one from the evidence</span>
+    <p class="note">
+      Builds it from the claims that matched this client's profile, ordered by
+      how well they fit. If they have no profile, or nothing matched, it will
+      say so rather than produce an empty document.
+    </p>
+    <form method="post" action="{% url 'ops-outputs' %}">
+      {% csrf_token %}
+      <label for="organization">Client</label>
+      <select id="organization" name="organization" required>
+        {% for org in organizations %}<option value="{{ org.slug }}">{{ org.name }}</option>{% endfor %}
+      </select>
+      <label for="type">Type</label>
+      <select id="type" name="type">
+        {% for value, label in types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" placeholder="Magnesium — what moved in October" required>
+      <label for="summary">Summary, if you want one</label>
+      <input type="text" id="summary" name="summary">
+      <div class="actions"><button type="submit">Draft it</button></div>
+    </form>
+  </div>
+{% endblock %}

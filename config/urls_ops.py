@@ -33,7 +33,9 @@ urlpatterns = [
     path("runs/", include("apps.ingestion.urls")),     # Ingestion runs
     path("resolution/", include("apps.evidence.urls")),  # Resolution queue
     path("client/", include("apps.clients.urls")),     # Client profile
-    path("output/", include("apps.outputs.urls")),     # Output builder
+    # The output builder lives in `publication`: its screens drive the gate,
+    # and the gate is a layer above `outputs`.
+    path("output/", include("apps.publication.urls")),  # Output builder
     path("tenants/", include("apps.billing.urls")),    # Organizations
     path("operations/", include("apps.operations.urls")),  # Operations
 ]

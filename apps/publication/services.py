@@ -160,15 +160,35 @@ def unpublish(*, publication: Publication, actor_label: str, reason: str) -> Non
     output.state = OutputState.APPROVED
     output.save(update_fields=["state"])
 
+    # A withdrawal after delivery is not the same event as a withdrawal before
+    # one, and `output.state` cannot tell them apart — it reads APPROVED either
+    # way, which after a delivery says "never sent" about something that is
+    # sitting in a client's inbox. There is no state for "withdrawn after
+    # delivery" and inventing one costs more than it is worth, so the fact goes
+    # where it will actually be read: the audit record.
+    from .delivery import delivered_recipients
+
+    delivered_to = delivered_recipients(publication)
+    sent_note = (
+        f" — already delivered to {len(delivered_to)} recipient(s); "
+        f"that email cannot be recalled"
+        if delivered_to
+        else ""
+    )
+
     _audit(
         kind=AuditEvent.Kind.PUBLICATION,
         actor_label=actor_label,
         organization=publication.organization,
         message=(
             f"Unpublished {publication.title} v{publication.version_number} "
-            f"from {publication.organization.name} — {reason}"
+            f"from {publication.organization.name} — {reason}{sent_note}"
         ),
-        context={"publication_id": publication.pk, "reason": reason},
+        context={
+            "publication_id": publication.pk,
+            "reason": reason,
+            "delivered_to": delivered_to,
+        },
     )
 
     signals.unpublished.send(sender=Publication, publication=publication, reason=reason)

@@ -1,0 +1,167 @@
+{% extends "ops/base.html" %}
+{% block title %}{{ output.title }}{% endblock %}
+
+{% block content %}
+  <h1>{{ output.title }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-outputs' %}">← Outputs</a> ·
+    {{ output.get_type_display }} for {{ organization.name }}
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Where it is</span>
+      {% if live %}<span class="state stored">published</span>
+      {% else %}<span class="state missing">{{ output.get_state_display|lower }}</span>{% endif %}
+    </div>
+    <p class="note">
+      {% if live %}
+        v{{ live.version_number }} published {{ live.published_at|date:"j M Y, H:i" }} by
+        {{ live.published_by_label }}.
+        {% if live.notified_at %}Sent to the client {{ live.notified_at|date:"j M Y, H:i" }}.
+        {% else %}<b>Not sent yet.</b>{% endif %}
+      {% else %}
+        Nothing is published. Approving is an internal record; publishing is the
+        separate step that lets it be sent.
+      {% endif %}
+    </p>
+  </div>
+
+  {% if output.requires_expert_review %}
+    <div class="card">
+      <div class="row">
+        <span class="name">Expert sign-off</span>
+        {% if signed_off %}<span class="state stored">recorded</span>
+        {% else %}<span class="state unreadable">required before publishing</span>{% endif %}
+      </div>
+      <p class="note">
+        This type carries health or scientific content, so a named reviewer has
+        to be recorded before it can be published — a stricter bar than
+        approval, because publishing is what puts a claim in front of a client.
+      </p>
+      {% for review in reviews %}
+        <p class="note">
+          {{ review.reviewer_label }} — {{ review.discipline }},
+          {{ review.signed_off_at|date:"j M Y" }}{% if review.note %} · {{ review.note }}{% endif %}
+        </p>
+      {% endfor %}
+      {% if not signed_off %}
+        <form method="post" action="{% url 'ops-output-signoff' output.pk %}">
+          {% csrf_token %}
+          <label for="reviewer">Reviewer's name</label>
+          <input type="text" id="reviewer" name="reviewer" required>
+          <label for="discipline">Discipline</label>
+          <input type="text" id="discipline" name="discipline" placeholder="Scientific / legal claims">
+          <label for="note">Note</label>
+          <input type="text" id="note" name="note">
+          <div class="actions"><button type="submit">Record the sign-off</button></div>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <span class="name">Versions</span>
+    <table>
+      <thead><tr><th>Version</th><th>State</th><th>Sections</th><th>Download</th><th></th></tr></thead>
+      <tbody>
+        {% for version in versions %}
+          <tr>
+            <td>v{{ version.number }}<div class="note">{{ version.created_at|date:"j M, H:i" }}</div></td>
+            <td class="muted">{{ version.get_state_display|lower }}</td>
+            <td class="muted">{{ version.body|length }}</td>
+            <td>
+              {% for fmt, label in formats %}
+                <a href="{% url 'ops-output-export' output.pk version.number fmt %}">{{ label }}</a>{% if not forloop.last %} · {% endif %}
+              {% endfor %}
+              {% if version.state != "published" and version.state != "delivered" %}
+                <div class="note">watermarked DRAFT</div>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" class="inline">
+                {% csrf_token %}
+                {% if version.state == "draft" or version.state == "review ready" %}
+                  <button type="submit" class="small"
+                          formaction="{% url 'ops-output-approve' output.pk version.number %}">Approve</button>
+                {% elif version.state == "approved" %}
+                  <button type="submit" class="small"
+                          formaction="{% url 'ops-output-publish' output.pk version.number %}">Publish</button>
+                {% endif %}
+              </form>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">No versions.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if live %}
+    <div class="card">
+      <span class="name">Send it to the client</span>
+      {% if recipients %}
+        <p class="note">
+          Goes to {{ recipients|length }} contact(s):
+          {% for r in recipients %}{{ r.email }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+          <a href="{% url 'ops-client-contacts' organization.slug %}">Change who →</a>
+        </p>
+        <form method="post" action="{% url 'ops-output-deliver' output.pk %}">
+          {% csrf_token %}
+          <label>Formats to attach</label>
+          <div class="inline">
+            {% for fmt, label in formats %}
+              <label style="margin:0">
+                <input type="checkbox" name="formats" value="{{ fmt }}"
+                       {% if fmt == "pdf" or fmt == "docx" %}checked{% endif %}> {{ label }}
+              </label>
+            {% endfor %}
+          </div>
+          <label for="note">A covering note, if you want one</label>
+          <textarea id="note" name="note" placeholder="Flagging section two in particular."></textarea>
+          <div class="actions"><button type="submit">Send it</button></div>
+        </form>
+      {% else %}
+        <p class="note" style="color:var(--bad)">
+          {{ organization.name }} has nobody set to receive outputs, so this
+          cannot be sent — a delivery to nobody would be recorded as sent.
+          <a href="{% url 'ops-client-contacts' organization.slug %}">Add a contact →</a>
+        </p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <span class="name">Withdraw it</span>
+      <p class="note">
+        Stops it being sent again. Anything already emailed <b>cannot be
+        recalled</b> — the reason you give goes in the audit record, which is
+        then the only account of what happened.
+      </p>
+      <form method="post" action="{% url 'ops-output-withdraw' output.pk %}">
+        {% csrf_token %}
+        <label for="reason">Why</label>
+        <input type="text" id="reason" name="reason" placeholder="Quote misattributed in section two" required>
+        <div class="actions"><button type="submit" class="danger">Withdraw</button></div>
+      </form>
+    </div>
+  {% endif %}
+
+  {% if deliveries %}
+    <div class="card">
+      <span class="name">Sent</span>
+      <table>
+        <tbody>
+          {% for d in deliveries %}
+            <tr>
+              <td>
+                {{ d.sent_at|date:"j M Y, H:i" }} · {{ d.recipients|length }} recipient(s)
+                <div class="note">{{ d.recipients|join:", " }} · {{ d.formats|join:", " }}</div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

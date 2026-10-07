@@ -272,3 +272,79 @@ def test_the_secret_never_reaches_a_log(caplog):
         connection.send_messages([message()])
 
     assert "re_test" not in caplog.text
+
+
+def test_an_attachment_carries_its_declared_type():
+    """The mimetype was being dropped, leaving Resend to infer it from the
+    filename. We already hold the answer; guessing from a string was never the
+    better option."""
+    email = message()
+    email.attach(
+        "brief.docx",
+        b"PK\x03\x04binary",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    connection = backend(accepted())
+
+    connection.send_messages([email])
+
+    (attachment,) = body_of(connection.handler.seen[0])["attachments"]
+    assert attachment["content_type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+def test_a_charset_parameter_is_stripped_from_the_type():
+    """Our text renderers declare `text/csv; charset=utf-8`; Resend takes the
+    media type alone."""
+    email = message()
+    email.attach("evidence.csv", "a,b\n1,2", "text/csv; charset=utf-8")
+    connection = backend(accepted())
+
+    connection.send_messages([email])
+
+    (attachment,) = body_of(connection.handler.seen[0])["attachments"]
+    assert attachment["content_type"] == "text/csv"
+
+
+def test_django_infers_a_type_when_the_caller_omits_one():
+    """`attach()` guesses from the extension, so the type reaches Resend even
+    when nobody passed one. Worth pinning: it means the common case is covered
+    without every caller remembering."""
+    email = message()
+    email.attach("notes.txt", "hello")
+    connection = backend(accepted())
+
+    connection.send_messages([email])
+
+    (attachment,) = body_of(connection.handler.seen[0])["attachments"]
+    assert attachment["content_type"] == "text/plain"
+
+
+def test_a_two_tuple_attachment_omits_the_type_rather_than_inventing_one():
+    """Nothing in this system builds one, but the backend reads index 2
+    positionally — so a shorter tuple must not raise."""
+    email = message()
+    email.attachments.append(("mystery", b"bytes"))
+    connection = backend(accepted())
+
+    connection.send_messages([email])
+
+    (attachment,) = body_of(connection.handler.seen[0])["attachments"]
+    assert "content_type" not in attachment
+
+
+def test_binary_attachment_bytes_survive_intact():
+    """A DOCX is a zip and a PDF is binary. Round-tripping through base64 is
+    the only part of the path we control."""
+    import base64 as b64
+
+    raw = bytes(range(256))
+    email = message()
+    email.attach("thing.pdf", raw, "application/pdf")
+    connection = backend(accepted())
+
+    connection.send_messages([email])
+
+    (attachment,) = body_of(connection.handler.seen[0])["attachments"]
+    assert b64.b64decode(attachment["content"]) == raw

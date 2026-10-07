@@ -227,7 +227,18 @@ class ResendBackend(BaseEmailBackend):
         filename, content = attachment[0], attachment[1]
         if isinstance(content, str):
             content = content.encode("utf-8")
-        return {
+
+        # The mimetype was being discarded, leaving Resend to infer the type
+        # from the filename. That is fine for `brief.pdf` and wrong the moment a
+        # filename is unusual or absent — and we already hold the answer, so
+        # guessing from a string was never the better option.
+        mimetype = attachment[2] if len(attachment) > 2 else None
+        payload = {
             "filename": filename or "attachment",
             "content": base64.b64encode(content).decode("ascii"),
         }
+        if mimetype:
+            # Resend takes the media type only, not the charset parameter our
+            # text renderers carry (`text/csv; charset=utf-8`).
+            payload["content_type"] = str(mimetype).split(";")[0].strip()
+        return payload
