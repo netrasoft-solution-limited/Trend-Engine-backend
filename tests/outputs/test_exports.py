@@ -195,6 +195,24 @@ def test_a_published_document_carries_no_watermark(fmt):
     assert exports.DRAFT_NOTICE not in body
 
 
+@pytest.mark.parametrize("fmt", ["markdown", "html", "csv"])
+def test_illustrative_content_says_so_in_every_format(fmt):
+    """Mark's 8 October review: demonstration records must be labelled. A label
+    only in the app is gone the moment the file is forwarded."""
+    body = exports.render(doc(is_draft=False, is_illustrative=True), fmt).content.decode()
+
+    assert exports.ILLUSTRATIVE_NOTICE in body
+    assert exports.DRAFT_NOTICE not in body
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html", "csv"])
+def test_an_illustrative_draft_carries_both_notices(fmt):
+    body = exports.render(doc(is_draft=True, is_illustrative=True), fmt).content.decode()
+
+    assert exports.ILLUSTRATIVE_NOTICE in body
+    assert exports.DRAFT_NOTICE in body
+
+
 def test_the_watermark_is_at_the_top_not_the_bottom():
     """Someone who forwards the first screenful has forwarded the warning."""
     body = exports.render(doc(is_draft=True), "markdown").content.decode()

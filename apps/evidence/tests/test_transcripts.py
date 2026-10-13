@@ -138,6 +138,50 @@ def test_the_walk_continues_past_a_rung_that_cannot_serve_the_item(podcast_item,
     assert statuses["assemblyai"] == Status.SUCCEEDED
 
 
+def test_every_walk_is_kept_on_the_item_route_by_route(podcast_item, rungs):
+    """PRD §14: every item shows its transcript source, method, status and cost.
+    The log line this used to end in answered nobody without server access."""
+    rungs(
+        taddy=unavailable("Taddy has no transcript for this episode"),
+        assemblyai=succeeds(TranscriptArtifact.Method.ASSEMBLYAI, cost="0.15"),
+    )
+
+    acquire(podcast_item)
+    podcast_item.refresh_from_db()
+
+    [attempt] = podcast_item.transcript_attempts
+    assert attempt["outcome"] == "transcribed"
+    assert attempt["method"] == TranscriptArtifact.Method.ASSEMBLYAI
+    assert attempt["cost_usd"] == "0.15"
+    steps = {s["step"]: s for s in attempt["steps"]}
+    assert steps["taddy"]["status"] == Status.UNAVAILABLE
+    assert steps["taddy"]["detail"] == "Taddy has no transcript for this episode"
+    assert steps["assemblyai"]["status"] == Status.SUCCEEDED
+
+
+def test_a_retried_item_keeps_its_earlier_walks(podcast_item, rungs):
+    rungs(taddy=fails("upstream 500"), assemblyai=unavailable())
+    acquire(podcast_item)
+    rungs(taddy=succeeds(TranscriptArtifact.Method.TADDY), assemblyai=unavailable())
+
+    acquire(podcast_item)
+    podcast_item.refresh_from_db()
+
+    outcomes = [a["outcome"] for a in podcast_item.transcript_attempts]
+    assert outcomes == ["will retry", "transcribed"]
+
+
+def test_the_kept_history_is_bounded(podcast_item, rungs):
+    from apps.evidence.models import MAX_TRANSCRIPT_ATTEMPTS
+
+    rungs(taddy=fails(), assemblyai=unavailable())
+    for _ in range(MAX_TRANSCRIPT_ATTEMPTS + 3):
+        acquire(podcast_item)
+    podcast_item.refresh_from_db()
+
+    assert len(podcast_item.transcript_attempts) == MAX_TRANSCRIPT_ATTEMPTS
+
+
 # ── The distinction that matters ────────────────────────────────────────────
 
 

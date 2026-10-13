@@ -83,14 +83,19 @@ def poll_source(self, source_id: int, limit: int | None = None) -> dict:
         # Misconfiguration, not an outage. Retrying asks the same broken
         # question again, so this is blocking and needs an operator.
         logger.error("Cannot collect from %s: %s", source.name, exc)
-        _finish(run, status=IngestionRun.Status.FAILED, blocking=True)
+        _finish(run, status=IngestionRun.Status.FAILED, blocking=True, error=str(exc))
         source.mark_polled(succeeded=False)
         return {"failed": str(exc), "blocking": True}
     except Exception as exc:
         # A vendor problem. The next scheduled poll picks it up, so this is not
         # blocking — but the run is still recorded as failed.
         logger.warning("Poll of %s failed: %s", source.name, exc)
-        _finish(run, status=IngestionRun.Status.FAILED, blocking=False)
+        _finish(
+            run,
+            status=IngestionRun.Status.FAILED,
+            blocking=False,
+            error=f"{type(exc).__name__}: {exc}",
+        )
         source.mark_polled(succeeded=False)
         raise self.retry(exc=exc) from exc
 
@@ -112,7 +117,12 @@ def poll_source(self, source_id: int, limit: int | None = None) -> dict:
         )
     dispatched = len(result.created_items)
 
-    _finish(run, status=IngestionRun.Status.SUCCEEDED, blocking=False)
+    _finish(
+        run,
+        status=IngestionRun.Status.SUCCEEDED,
+        blocking=False,
+        counts=(len(rows), result.created, result.seen_before),
+    )
     source.mark_polled(succeeded=True)
 
     return {
@@ -123,8 +133,27 @@ def poll_source(self, source_id: int, limit: int | None = None) -> dict:
     }
 
 
-def _finish(run: IngestionRun, *, status: str, blocking: bool) -> None:
+def _finish(
+    run: IngestionRun,
+    *,
+    status: str,
+    blocking: bool,
+    error: str = "",
+    counts: tuple[int, int, int] = (0, 0, 0),
+) -> None:
     run.status = status
     run.blocking = blocking
     run.finished_at = timezone.now()
-    run.save(update_fields=["status", "blocking", "finished_at"])
+    run.error = error[:2000]
+    run.items_collected, run.items_created, run.items_seen_before = counts
+    run.save(
+        update_fields=[
+            "status",
+            "blocking",
+            "finished_at",
+            "error",
+            "items_collected",
+            "items_created",
+            "items_seen_before",
+        ]
+    )

@@ -6,8 +6,9 @@ Every model here carries `organization` and uses TenantScopedManager
 as its default manager. That is not optional: an unscoped default
 manager on a tenant model is the leak Arch §5.2 exists to prevent.
 
-Only `ClientSignalScore` exists so far, with the fields candidate ranking
-needs. Score components, Recommendation and Feedback are not modelled yet.
+`ClientSignalScore` carries PRD §6.3's client rank with its components;
+`Recommendation` is the client-specific "why it matters, what to do" an operator
+reviews. Feedback is not modelled yet.
 """
 from __future__ import annotations
 
@@ -33,6 +34,27 @@ class ClientSignalScore(TenantScopedModel):
     #: "How much should we trust this?" — tracked separately from importance,
     #: on purpose (PRD §6.3).
     confidence = models.PositiveSmallIntegerField(validators=SCORE_VALIDATORS)
+
+    #: PRD §6.3: 60% domain signal + 20% asset relevance + 10% audience fit +
+    #: 10% strategic priority. Null on rows written before it was computed
+    #: (and on seeded rows), which rank after every computed one.
+    rank_score = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=SCORE_VALIDATORS
+    )
+    #: `{"domain"|"asset"|"audience"|"priority": {"value", "weight", "detail"}}`
+    #: — the four parts of `rank_score`, as computed (Arch §8.2).
+    components = models.JSONField(default=dict, blank=True)
+    #: Which of this client's products, audiences and priorities matched, and
+    #: on which word — the answer to "why is this Jarrow's business?".
+    matches = models.JSONField(default=list, blank=True)
+    profile = models.ForeignKey(
+        "clients.ClientProfileVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="signal_scores",
+    )
+    scored_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("organization", "-fit_score")
@@ -140,3 +162,87 @@ class ClaimRelevance(TenantScopedModel):
             if label not in seen:
                 seen.append(label)
         return "Matched " + ", ".join(seen[:4]) + ("…" if len(seen) > 4 else "")
+
+
+class Recommendation(TenantScopedModel):
+    """Why one signal matters to one client, and what they should do about it.
+
+    The analytical step Mark's 8 October review found missing: connecting a
+    development to a client's portfolio and a concrete response. Drafted by a
+    model from the signal's own evidence and the client's own profile — never
+    another client's (PRD §6.4) — and then reviewed by an operator. Nothing
+    here reaches a client until a brief built from APPROVED recommendations
+    goes through the publication gate.
+
+    GROUNDED OR NOT STORED. Every action cites at least one of the signal's
+    claims; a product is named only if it is in the client's profile. What the
+    validator dropped is kept in `validation`, so a model that keeps reaching
+    past its evidence is visible rather than quietly corrected.
+    """
+
+    class State(models.TextChoices):
+        # PRD §6.5's recommendation states.
+        PROPOSED = "proposed", "Proposed"
+        EDITED = "operator edited", "Operator edited"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    #: The states in which a recommendation is the current one for its signal.
+    OPEN_STATES = (State.PROPOSED, State.EDITED, State.APPROVED)
+
+    signal = models.ForeignKey(
+        "intelligence.Signal", on_delete=models.CASCADE, related_name="recommendations"
+    )
+    profile = models.ForeignKey(
+        "clients.ClientProfileVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recommendations",
+    )
+    state = models.CharField(max_length=20, choices=State.choices, default=State.PROPOSED)
+
+    why_it_matters = models.TextField()
+    #: Example Outputs B2's "what it does not prove" — the limits of the
+    #: evidence, carried into the brief so a client never reads more into a
+    #: development than the evidence supports.
+    limits = models.TextField(blank=True)
+    #: [{"owner", "action", "success_measure", "claim_ids": [..]}, ...]
+    actions = models.JSONField(default=list)
+    #: Product names, each one present in `profile`.
+    products = models.JSONField(default=list, blank=True)
+    cited_claim_ids = models.JSONField(default=list, blank=True)
+    #: What the validator removed: invented claim IDs, uncited actions, products
+    #: not in the profile.
+    validation = models.JSONField(default=dict, blank=True)
+
+    model_run = models.ForeignKey(
+        "enrichment.ModelRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recommendations",
+    )
+    prompt_version = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    edited_by_label = models.CharField(max_length=200, blank=True)
+    decided_by_label = models.CharField(max_length=200, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "-created_at")
+        constraints = [
+            # History is kept — a rejected recommendation stays on record — but
+            # only one is current per signal per client, so "what do we
+            # recommend?" has one answer.
+            models.UniqueConstraint(
+                fields=["organization", "signal"],
+                condition=models.Q(state__in=["proposed", "operator edited", "approved"]),
+                name="one_open_recommendation_per_signal",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Recommendation on {self.signal_id} @ {self.organization_id} ({self.state})"

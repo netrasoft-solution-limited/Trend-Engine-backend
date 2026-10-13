@@ -22,6 +22,16 @@ urlpatterns = [
         name="ops-client-profile-draft",
     ),
     path(
+        "<slug:slug>/profile/import/",
+        views.ClientProfileImportView.as_view(),
+        name="ops-client-profile-import",
+    ),
+    path(
+        "<slug:slug>/profile/<int:number>/export/",
+        views.ClientProfileExportView.as_view(),
+        name="ops-client-profile-export",
+    ),
+    path(
         "<slug:slug>/profile/<int:number>/",
         views.ClientProfileView.as_view(),
         name="ops-client-profile",

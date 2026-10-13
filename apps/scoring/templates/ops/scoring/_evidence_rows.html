@@ -1,0 +1,31 @@
+{% comment %}
+One row per claim: what was said, the speaker's exact words, and a link that
+opens the recording at that moment. Rows the recommendation rests on are
+highlighted, and each has an anchor its action links to.
+{% endcomment %}
+<div class="table-wrap" style="margin-top:8px">
+  <table>
+    <tbody>
+      {% for row in rows %}
+        <tr id="c{{ row.claim_id }}" {% if row.is_cited_by_recommendation %}class="target"{% endif %}>
+          <td style="width:64px" class="muted">C{{ row.claim_id }}</td>
+          <td>
+            {{ row.claim.text }}
+            {% if row.claim.quote %}<blockquote>“{{ row.claim.quote }}”</blockquote>{% endif %}
+            <div class="note" style="margin-top:2px">
+              {{ row.claim.content_item.creator|default:row.claim.content_item.source.name }} ·
+              <a href="{% url 'ops-item' row.claim.content_item_id %}">{{ row.claim.content_item.title|truncatechars:70 }}</a>
+              · {{ row.said_on|date:"j M Y" }}
+              {% if row.at %}·
+                {% if row.link %}<a href="{{ row.link }}" target="_blank" rel="noopener noreferrer">at {{ row.at }}</a>{% else %}at {{ row.at }}{% endif %}
+              {% endif %}
+              {% if row.claim.is_cited %}<span class="pill live">cites a study</span>{% endif %}
+            </div>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td class="empty">None.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

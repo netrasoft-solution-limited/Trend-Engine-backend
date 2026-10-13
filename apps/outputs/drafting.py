@@ -167,10 +167,10 @@ def sections_for(
     profile = client_services.current_for(organization)
     if profile is None:
         raise DraftingError(
-            f"{organization} has no active client profile, so there is nothing to "
-            f"tailor this brief to. Create one with clients.services.draft() and "
-            f"activate it — an untailored brief would be the same document every "
-            f"other client receives."
+            f"{organization} has no live client profile, so there is nothing to "
+            f"tailor this brief to. Open Clients → {organization}, start a profile "
+            f"(by hand or from a product list) and make it live — an untailored "
+            f"brief would be the same document every other client receives."
         )
 
     scores = list(relevance.relevant_claims(organization, profile_version=profile))

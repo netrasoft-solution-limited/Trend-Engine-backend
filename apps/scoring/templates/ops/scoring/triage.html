@@ -1,0 +1,119 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Triage (PRD §6.5; Example Outputs A1). One client's ranked queue: what moved,
+how much it matters to them, how sure we are, and what has been decided.
+{% endcomment %}
+{% block title %}Triage · {{ organization.name }}{% endblock %}
+
+{% block content %}
+  <h1>Triage</h1>
+  <p class="lede">
+    Developments detected across sources, ranked for
+    <b>{{ organization.name }}</b>{% if profile %} against profile {{ profile.citation }}{% endif %}.
+    Rank is 60% how much the development is moving and 40% how much it touches this
+    client's products, audiences and priorities. Confidence is separate: how sure we
+    are it is real.
+  </p>
+
+  <div class="card">
+    <span class="name">Client</span>
+    <div class="actions" style="margin-top:8px;flex-wrap:wrap">
+      {% for c in clients %}
+        <a href="{% url 'ops-triage' c.slug %}">
+          <button type="button" class="small {% if c.pk != organization.pk %}secondary{% endif %}">
+            {{ c.name }}{% if c.is_fixture %} (fixture){% endif %}
+          </button>
+        </a>
+      {% endfor %}
+    </div>
+    {% if not profile %}
+      <p class="note state unreadable">
+        {{ organization.name }} has no live profile, so nothing can be ranked for them.
+        <a href="{% url 'ops-client' organization.slug %}">Set one up →</a>
+      </p>
+    {% endif %}
+    <form method="post" class="inline" style="margin-top:12px">
+      {% csrf_token %}
+      <button type="submit" name="action" value="rank" class="small secondary">Re-rank for {{ organization.name }}</button>
+      <button type="submit" name="action" value="detect" class="small secondary">Detect signals now</button>
+      <span class="note" style="margin:0">
+        Re-ranking is free. Detecting reads the last 35 days of claims in one model call
+        (it also runs every morning).
+      </span>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Brief for {{ organization.name }}</span>
+      <span class="state">{{ approved_developments }} development(s) ready</span>
+    </div>
+    <p class="note">
+      A development goes into the brief when the signal is approved and
+      {{ organization.name }}'s recommendation on it is approved. The brief is a draft
+      until it is approved and published from Outputs.
+    </p>
+    {% if approved_developments %}
+      <form method="post" action="{% url 'ops-outputs' %}" style="margin-top:8px">{% csrf_token %}
+        <input type="hidden" name="organization" value="{{ organization.slug }}">
+        <input type="hidden" name="type" value="trend_brief">
+        <button type="submit">Draft the brief from {{ approved_developments }} development(s)</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">{% if show_rejected %}Rejected{% else %}Open signals{% endif %}</span>
+      <span class="state">
+        {% if show_rejected %}<a href="?">Show open</a>{% else %}<a href="?state=rejected">Show rejected</a>{% endif %}
+      </span>
+    </div>
+    {% if unranked %}
+      <p class="note">{{ unranked }} signal(s) have no rank for this client yet — re-rank to compute them.</p>
+    {% endif %}
+    <div class="table-wrap" style="margin-top:10px">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">Rank</th><th>Development</th>
+            <th class="num">Signal</th><th class="num">Fit</th><th class="num">Confidence</th>
+            <th>State</th><th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in signals %}
+            <tr>
+              <td class="num"><b>{{ s.rank_score|default_if_none:"—" }}</b></td>
+              <td>
+                <a href="{% url 'ops-signal' organization.slug s.code %}">{{ s.title }}</a>
+                {% if s.is_illustrative %}<span class="pill illustrative">illustrative</span>{% endif %}
+                {% if s.needs_scientific_routing %}<span class="pill">needs expert</span>{% endif %}
+                <div class="note" style="margin-top:2px">
+                  {{ s.code }}{% if s.signal_type %} · {{ s.get_signal_type_display }}{% endif %}
+                  {% if not s.is_illustrative %}
+                    · {{ s.item_count }} item(s), {{ s.creator_count }} creator(s)
+                    · score rests on {{ s.available }} of {{ s.component_total }} components
+                  {% endif %}
+                </div>
+              </td>
+              <td class="num">{{ s.domain_score }}</td>
+              <td class="num">{{ s.fit_score|default_if_none:"—" }}</td>
+              <td class="num">{{ s.confidence }}</td>
+              <td>
+                {% if s.state == "approved" %}<span class="state stored">approved</span>
+                {% elif s.state == "rejected" %}<span class="state missing">rejected</span>
+                {% else %}<span class="state env">{{ s.get_state_display|lower }}</span>{% endif %}
+              </td>
+              <td class="muted">{{ s.recommendation_state|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">
+              {% if show_rejected %}Nothing rejected.{% else %}No open signals yet. Detection runs every morning over the last 35 days of claims.{% endif %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

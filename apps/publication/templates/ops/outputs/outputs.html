@@ -14,7 +14,10 @@
       <tbody>
         {% for row in outputs %}
           <tr>
-            <td><a href="{% url 'ops-output' row.obj.pk %}">{{ row.obj.title }}</a></td>
+            <td>
+              <a href="{% url 'ops-output' row.obj.pk %}">{{ row.obj.title }}</a>
+              {% if row.obj.is_illustrative %}<span class="pill illustrative">illustrative</span>{% endif %}
+            </td>
             <td class="muted">{{ row.obj.organization.name }}</td>
             <td class="muted">{{ row.obj.get_type_display }}</td>
             <td>
@@ -33,11 +36,13 @@
   </div>
 
   <div class="card">
-    <span class="name">Draft one from the evidence</span>
+    <span class="name">Draft one</span>
     <p class="note">
-      Builds it from the claims that matched this client's profile, ordered by
-      how well they fit. If they have no profile, or nothing matched, it will
-      say so rather than produce an empty document.
+      A <b>trend brief</b> is built from the developments approved for that client in
+      Triage — each with its approved recommendation, quoted evidence and source links.
+      A <b>content brief</b> starts from one approved recommendation: use the button on
+      its Signal Review page. If nothing is approved yet, this will say so rather than
+      produce an empty document.
     </p>
     <form method="post" action="{% url 'ops-outputs' %}">
       {% csrf_token %}
@@ -47,12 +52,20 @@
       </select>
       <label for="type">Type</label>
       <select id="type" name="type">
-        {% for value, label in types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        {% for value, label, available in types %}
+          <option value="{{ value }}" {% if not available %}disabled{% endif %}>
+            {{ label }}{% if not available %} — not built yet{% endif %}
+          </option>
+        {% endfor %}
       </select>
       <label for="title">Title</label>
-      <input type="text" id="title" name="title" placeholder="Magnesium — what moved in October" required>
+      <input type="text" id="title" name="title" placeholder="Leave blank for “Client — trend brief, date”">
       <label for="summary">Summary, if you want one</label>
       <input type="text" id="summary" name="summary">
+      <label class="check">
+        <input type="checkbox" name="is_illustrative" value="1">
+        Illustrative — demonstration content, labelled as such on every export
+      </label>
       <div class="actions"><button type="submit">Draft it</button></div>
     </form>
   </div>

@@ -1,0 +1,121 @@
+{% extends "ops/base.html" %}
+{% comment %}
+One item, end to end: where it came from and on what basis, what the relevance
+check decided, how it was transcribed (every route tried, not just the winner),
+what it cost, and every claim with the moment it was said.
+{% endcomment %}
+{% block title %}{{ item.title|truncatechars:60 }}{% endblock %}
+
+{% block content %}
+  <h1>{{ item.title }}</h1>
+  <p class="lede">
+    {% if item.run %}<a href="{% url 'ops-run' item.run.pk %}">← Run of {{ item.run.started_at|date:"j M, H:i" }}</a> · {% endif %}
+    {{ item.source.name }} · {{ item.creator|default:"unattributed" }}
+    {% if item.published_at %}· published {{ item.published_at|date:"j M Y" }}{% endif %}
+    {% if item.url %}· <a href="{{ item.url }}" rel="noopener noreferrer" target="_blank">open the source</a>{% endif %}
+  </p>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat">
+        <b>{% if item.gate_decision == "relevant" or item.gate_decision == "sampled" %}Relevant{% elif item.gate_decision == "rejected" %}Set aside{% else %}Pending{% endif %}</b>
+        <span>relevance check{% if item.gate_decision == "sampled" %} (sampled anyway){% endif %}</span>
+      </div>
+      <div class="stat">
+        <b>{% if transcript %}{{ transcript.get_method_display }}{% elif item.content_state == "metadata" %}None{% else %}—{% endif %}</b>
+        <span>transcript{% if item.content_state == "metadata" %}: metadata only{% endif %}</span>
+      </div>
+      <div class="stat"><b>{{ claims|length }}</b><span>claims</span></div>
+      <div class="stat"><b>${{ total_cost|floatformat:3 }}</b><span>cost so far</span></div>
+    </div>
+    {% if item.gate_reason %}<p class="note"><b>Why:</b> {{ item.gate_reason }}</p>{% endif %}
+    <p class="note">
+      Access basis: {% if item.policy %}{{ item.policy }}{% else %}<span class="state unreadable">none recorded</span>{% endif %}
+      · collected {{ item.discovered_at|date:"j M Y, H:i" }}
+    </p>
+  </div>
+
+  <div class="card">
+    <span class="name">Transcript routes tried</span>
+    {% if transcript %}
+      <p class="note">
+        {{ transcript.get_method_display }} · {{ transcript.text|length }} characters ·
+        quality {{ transcript.quality }} · ${{ transcript.cost_usd }}
+      </p>
+    {% endif %}
+    {% for attempt in attempts %}
+      <div class="table-wrap" style="margin-top:10px">
+        <p class="note" style="margin:0 0 4px"><b>{{ attempt.at }}</b> — {{ attempt.outcome }}{% if attempt.method %} via {{ attempt.method }}{% endif %}</p>
+        <table>
+          <tbody>
+            {% for step in attempt.steps %}
+              <tr>
+                <td style="width:180px"><code>{{ step.step }}</code></td>
+                <td style="width:110px">
+                  {% if step.status == "succeeded" %}<span class="state stored">succeeded</span>
+                  {% elif step.status == "failed" %}<span class="state unreadable">failed</span>
+                  {% else %}<span class="state missing">{{ step.status }}</span>{% endif %}
+                </td>
+                <td class="muted">{{ step.detail }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% empty %}
+      <p class="note">
+        {% if transcript %}Transcribed before route-by-route records were kept (12 October).
+        {% else %}No transcript has been attempted.{% endif %}
+      </p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <span class="name">Claims</span>
+    <p class="note">
+      Each claim is quoted exactly as said. Sponsored claims came from a paid read and
+      are never used as evidence.
+    </p>
+    {% for claim in claims %}
+      <div style="padding:10px 0;border-top:1px solid var(--line)">
+        <div>
+          <span class="pill">{{ claim.get_kind_display|lower }}</span>
+          {% if claim.is_cited %}<span class="pill live">cites a study</span>{% endif %}
+          {% if claim.is_sponsored %}<span class="pill illustrative">sponsored</span>{% endif %}
+          {% if claim.at %}
+            {% if claim.link %}<a href="{{ claim.link }}" rel="noopener noreferrer" target="_blank">{{ claim.at }}</a>{% else %}<span class="muted">{{ claim.at }}</span>{% endif %}
+          {% endif %}
+        </div>
+        <div style="margin-top:4px">{{ claim.text }}</div>
+        {% if claim.quote %}<blockquote>“{{ claim.quote }}”</blockquote>{% endif %}
+      </div>
+    {% empty %}
+      <p class="empty">
+        {% if item.content_state == "transcribed" %}No claims extracted yet.
+        {% else %}Claims are only extracted from a transcript.{% endif %}
+      </p>
+    {% endfor %}
+  </div>
+
+  {% if model_runs %}
+    <div class="card">
+      <span class="name">Model calls</span>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead><tr><th>When</th><th>Purpose</th><th>Model</th><th>Outcome</th><th class="num">Cost</th></tr></thead>
+          <tbody>
+            {% for run in model_runs %}
+              <tr>
+                <td class="muted">{{ run.at|date:"j M, H:i" }}</td>
+                <td>{{ run.get_purpose_display }}</td>
+                <td class="muted"><code>{{ run.model }}</code></td>
+                <td>{{ run.get_outcome_display }}</td>
+                <td class="num">${{ run.cost_usd|floatformat:4 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

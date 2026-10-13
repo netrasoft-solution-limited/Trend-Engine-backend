@@ -28,6 +28,7 @@ from functools import lru_cache
 
 from .document import (  # noqa: F401 — the public surface of this package
     DRAFT_NOTICE,
+    ILLUSTRATIVE_NOTICE,
     RENDERER_VERSION,
     ExportDocument,
     Provenance,

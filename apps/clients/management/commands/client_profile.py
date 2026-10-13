@@ -1,10 +1,9 @@
 """Define, inspect and activate a client profile from a JSON file.
 
-There is no operator screen for this yet, and a client profile is the one thing
-the system cannot infer — it is commercial knowledge that lives with the
-operator. A file is a better interim than a script: it is reviewable, it can be
-sent to the client to correct, it diffs, and it is the same shape the Client
-Profile screen will post when it exists.
+A client profile is the one thing the system cannot infer — it is commercial
+knowledge that lives with the operator. The Client Profile screen is the normal
+path now, and imports and exports this same file; the command stays because it
+is scriptable and it is what runs in a recovery.
 
     manage.py client_profile show    jarrow
     manage.py client_profile load    jarrow profiles/jarrow.json --activate
@@ -35,15 +34,9 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.clients import services
-from apps.clients.models import ClientAsset, ClientProfileVersion, ClientTerm
+from apps.clients.models import ClientProfileVersion
 from apps.tenancy.context import operator_scope, scoped
 from apps.tenancy.models import Organization
-
-FACETS = {
-    "audiences": ClientTerm.Facet.AUDIENCE,
-    "priorities": ClientTerm.Facet.PRIORITY,
-    "competitors": ClientTerm.Facet.COMPETITOR,
-}
 
 
 class Command(BaseCommand):
@@ -141,37 +134,14 @@ class Command(BaseCommand):
         except json.JSONDecodeError as exc:
             raise CommandError(f"{path} is not valid JSON: {exc}") from exc
 
-        # Copying is off: a file is the whole profile. Merging it onto the
-        # previous version would make "what is in this profile?" a question
-        # about history rather than about the file in front of you.
-        version = services.draft(
+        # Copying is off: a file is the whole profile. The same loader backs the
+        # import on the profile screen, so the two cannot disagree about a file.
+        version = services.load_spec(
             organization,
+            spec,
             label=spec.get("label", path.name),
             actor_label="client_profile command",
-            copy_current=False,
         )
-
-        for row in spec.get("assets", []):
-            ClientAsset.objects.create(
-                organization=organization,
-                profile=version,
-                name=row["name"],
-                kind=row.get("kind", ClientAsset.Kind.PRODUCT),
-                terms=row.get("terms", []),
-                weight=row.get("weight", 50),
-                notes=row.get("notes", ""),
-            )
-        for key, facet in FACETS.items():
-            for row in spec.get(key, []):
-                ClientTerm.objects.create(
-                    organization=organization,
-                    profile=version,
-                    facet=facet,
-                    name=row["name"],
-                    terms=row.get("terms", []),
-                    weight=row.get("weight", 50),
-                    notes=row.get("notes", ""),
-                )
 
         self.stdout.write(
             f"Drafted v{version.number}: {version.assets.count()} asset(s), "

@@ -20,10 +20,12 @@ provider screen uses for its "clear" button, widened to a table.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
@@ -209,14 +211,115 @@ class ClientProfileDraftView(View):
         organization = _organization(slug)
 
         with scoped(organization):
+            had_live = services.current_for(organization) is not None
             version = services.draft(
                 organization,
                 label=(request.POST.get("label") or "").strip(),
                 actor_label=getattr(request.user, "email", str(request.user)),
                 copy_current=True,
             )
-        messages.success(request, f"Drafted v{version.number} from the live profile.")
+        messages.success(
+            request,
+            f"Drafted v{version.number} from the live profile."
+            if had_live
+            else f"Started v{version.number}. Add what they sell below, then make it live.",
+        )
         return redirect(reverse("ops-client-profile", args=[slug, version.number]))
+
+
+#: A profile file is a few kilobytes. Anything near this is the wrong file.
+MAX_IMPORT_BYTES = 1_000_000
+
+
+class ClientProfileImportView(View):
+    """Draft a version from a file: a JSON profile, or a CSV product list.
+
+    The browser half of `client_profile load`, and the route for a storefront
+    that will not be read. JSON is the whole profile, exactly as exported. A
+    CSV is only products, so it is added to a copy of the live profile rather
+    than replacing it — importing a product list should not silently drop the
+    audiences and priorities someone wrote by hand.
+
+    Never activates. The draft opens for review, like every other draft.
+    """
+
+    def post(self, request, slug):
+        require_platform_admin(request, action="Importing a profile")
+        organization = _organization(slug)
+        back = redirect(reverse("ops-client", args=[slug]))
+
+        upload = request.FILES.get("file")
+        if upload is None:
+            messages.error(request, "Choose a file to import.")
+            return back
+        if upload.size > MAX_IMPORT_BYTES:
+            messages.error(request, "That file is too large to be a profile or product list.")
+            return back
+
+        try:
+            text = upload.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            messages.error(
+                request, "That file is not text. Save the sheet as CSV (UTF-8) and try again."
+            )
+            return back
+
+        is_json = upload.name.lower().endswith(".json")
+        actor = getattr(request.user, "email", str(request.user))
+        try:
+            if is_json:
+                spec = json.loads(text)
+                if not isinstance(spec, dict):
+                    raise services.ProfileError("A profile file is one JSON object.")
+            else:
+                spec = services.spec_from_csv(text)
+        except json.JSONDecodeError as exc:
+            messages.error(request, f"That is not valid JSON: {exc}")
+            return back
+        except services.ProfileError as exc:
+            messages.error(request, str(exc))
+            return back
+
+        with scoped(organization):
+            version = services.load_spec(
+                organization,
+                spec,
+                label=(request.POST.get("label") or "").strip() or f"Imported from {upload.name}",
+                actor_label=actor,
+                copy_current=not is_json,
+            )
+            counts = (version.assets.count(), version.terms.count())
+
+        messages.success(
+            request,
+            f"Drafted v{version.number} from {upload.name}: {counts[0]} asset(s), "
+            f"{counts[1]} audience/priority/competitor term(s). Review it, then make it live.",
+        )
+        return redirect(reverse("ops-client-profile", args=[slug, version.number]))
+
+
+class ClientProfileExportView(View):
+    """One version as the JSON file `client_profile load` and the import accept.
+
+    So a profile can go to the client to correct and come back — the round trip
+    that makes a discovered draft editable without retyping it.
+    """
+
+    def get(self, request, slug, number):
+        require_platform_admin(request, action="Exporting a profile")
+        organization = _organization(slug)
+
+        with scoped(organization):
+            version = get_object_or_404(ClientProfileVersion, number=number)
+            spec = services.to_spec(version)
+
+        response = HttpResponse(
+            json.dumps(spec, indent=2, ensure_ascii=False), content_type="application/json"
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="{organization.slug}-profile-v{version.number}.json"'
+        )
+        return response
 
 
 class ClientProfileActivateView(View):

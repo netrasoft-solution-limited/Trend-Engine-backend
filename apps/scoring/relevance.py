@@ -209,9 +209,9 @@ def score_for(organization, *, profile_version: ClientProfileVersion | None = No
     version = profile_version or client_services.current_for(organization)
     if version is None:
         raise ValueError(
-            f"{organization} has no active client profile. Nothing can be scored for "
-            f"a client the system knows nothing about — create one with "
-            f"clients.services.draft() and activate it."
+            f"{organization} has no live client profile. Nothing can be scored for "
+            f"a client the system knows nothing about — open Clients → "
+            f"{organization}, start a profile and make it live."
         )
 
     profile = compile_profile(version)

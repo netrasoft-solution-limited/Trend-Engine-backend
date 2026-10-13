@@ -27,9 +27,13 @@ from datetime import datetime
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 from .document import ExportDocument
+from .text import spans
 
 MIMETYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 EXTENSION = "docx"
@@ -49,7 +53,7 @@ def render(document: ExportDocument) -> bytes:
     _set_base_style(doc)
     _pin_core_properties(doc)
 
-    if document.is_draft:
+    if document.has_notice:
         notice = doc.add_paragraph()
         notice.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = notice.add_run(document.notice)
@@ -92,9 +96,9 @@ def render(document: ExportDocument) -> bytes:
                     # "List Bullet" is a built-in style, so the list survives
                     # into Google Docs and Pages rather than relying on a style
                     # this file would have to define.
-                    doc.add_paragraph(item, style="List Bullet")
+                    _add_linked(doc.add_paragraph(style="List Bullet"), item)
             else:
-                doc.add_paragraph(block.text)
+                _add_linked(doc.add_paragraph(), block.text)
 
     if not document.provenance.is_empty:
         parts = []
@@ -111,6 +115,41 @@ def render(document: ExportDocument) -> bytes:
     buffer = io.BytesIO()
     doc.save(buffer)
     return _normalise(buffer.getvalue())
+
+
+def _add_linked(paragraph, text: str) -> None:
+    """Prose with real hyperlinks — the source of every quote one click away."""
+    for span in spans(text):
+        if span.href:
+            _hyperlink(paragraph, span.href, span.text)
+        else:
+            paragraph.add_run(span.text)
+
+
+def _hyperlink(paragraph, url: str, label: str) -> None:
+    """python-docx has no public hyperlink API; this is the documented XML.
+
+    The relationship id comes from the part's own counter, so two renders of
+    one document allocate the same ids in the same order and stay identical.
+    """
+    rel_id = paragraph.part.relate_to(url, RT.HYPERLINK, is_external=True)
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("r:id"), rel_id)
+    run = OxmlElement("w:r")
+    properties = OxmlElement("w:rPr")
+    style = OxmlElement("w:rStyle")
+    style.set(qn("w:val"), "Hyperlink")
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "1F5140")
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    properties.extend([style, color, underline])
+    text = OxmlElement("w:t")
+    text.text = label
+    text.set(qn("xml:space"), "preserve")
+    run.extend([properties, text])
+    link.append(run)
+    paragraph._p.append(link)
 
 
 def _set_base_style(doc) -> None:

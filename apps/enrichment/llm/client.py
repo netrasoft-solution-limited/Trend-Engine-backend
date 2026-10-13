@@ -81,6 +81,13 @@ def extraction_tier() -> Tier:
     return _tier("extraction", "claude-sonnet-5-5", 8000)
 
 
+def recommendation_tier() -> Tier:
+    # Client-facing judgement, so the strong model (Arch §10.3) — but a short
+    # answer: why it matters and up to four actions. The low ceiling is also
+    # what the pre-call estimate prices, keeping one call near $0.10.
+    return _tier("recommendation", "claude-opus-5-5", 4000)
+
+
 def drafting_tier() -> Tier:
     # Arch §10.3: "stronger tier only for client-facing drafting."
     return _tier("drafting", "claude-opus-5-5", 16000)

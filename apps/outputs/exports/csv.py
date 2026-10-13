@@ -15,6 +15,7 @@ import csv as _csv
 import io
 
 from .document import ExportDocument
+from .text import unlinked
 
 MIMETYPE = "text/csv; charset=utf-8"
 EXTENSION = "csv"
@@ -29,15 +30,17 @@ def render(document: ExportDocument) -> bytes:
     writer = _csv.writer(buffer, lineterminator="\r\n", quoting=_csv.QUOTE_MINIMAL)
 
     writer.writerow(["section", "paragraph"])
-    if document.is_draft:
+    if document.has_notice:
         writer.writerow([document.notice, ""])
 
     for section in document.sections:
         for block in section.blocks:
+            # A spreadsheet cell has no hyperlink runs; the URL is written out
+            # so the source is still one copy-paste away.
             if block.is_bullets:
                 for item in block.items:
-                    writer.writerow([section.heading, item])
+                    writer.writerow([section.heading, unlinked(item)])
             else:
-                writer.writerow([section.heading, block.text])
+                writer.writerow([section.heading, unlinked(block.text)])
 
     return buffer.getvalue().encode("utf-8")

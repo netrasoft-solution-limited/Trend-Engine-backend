@@ -72,6 +72,12 @@ class Output(TenantScopedModel):
     client_profile_version = models.CharField(max_length=64, blank=True)
     domain_pack_version = models.CharField(max_length=64, blank=True)
 
+    #: Demonstration or test content, not a finding. Set once when the output
+    #: is first drafted and carried onto every export as a notice, because a
+    #: document that leaves this system can no longer be told apart by where
+    #: it came from. Always on for a fixture organisation.
+    is_illustrative = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -30,7 +30,9 @@ urlpatterns = [
     path("", include("apps.scoring.urls")),          # Triage · Signal review
     path("research/", include("apps.research.urls")),  # Research inbox
     path("sources/", include("apps.sources.urls")),    # Source registry
-    path("runs/", include("apps.ingestion.urls")),     # Ingestion runs
+    # Ingestion runs and the item pages behind them. Owned by `enrichment`,
+    # the lowest layer that may read runs, items and claims together.
+    path("", include("apps.enrichment.urls")),         # Ingestion runs · items
     path("resolution/", include("apps.evidence.urls")),  # Resolution queue
     path("client/", include("apps.clients.urls")),     # Client profile
     # The output builder lives in `publication`: its screens drive the gate,

@@ -22,6 +22,7 @@ def document_for_publication(publication) -> ExportDocument:
         summary=publication.summary,
         body=publication.body,
         is_draft=publication.unpublished_at is not None,
+        is_illustrative=publication.output.is_illustrative,
         # The publication date, not the render time — a stable fact about the
         # document, so the same publication always renders to the same bytes.
         dated=publication.published_at.date() if publication.published_at else None,

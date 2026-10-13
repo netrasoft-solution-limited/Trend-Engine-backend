@@ -1,0 +1,71 @@
+{% extends "ops/base.html" %}
+{% block title %}Run · {{ run.source.name }}{% endblock %}
+
+{% block content %}
+  <h1>{{ run.source.name }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-runs' %}">← Runs</a> ·
+    started {{ run.started_at|date:"j M Y, H:i" }}
+    {% if run.finished_at %}· finished {{ run.finished_at|date:"H:i" }}{% endif %}
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">
+        {% if run.status == "succeeded" %}<span class="state stored">Succeeded</span>
+        {% elif run.status == "running" %}<span class="state env">Running</span>
+        {% else %}<span class="state unreadable">Failed{% if run.blocking %} — needs an operator{% else %} — the next poll retries{% endif %}</span>{% endif %}
+      </span>
+      <span class="state">
+        {{ run.items_collected }} found · {{ run.items_created }} new ·
+        {{ run.items_seen_before }} already held · ${{ total_cost|floatformat:2 }} so far
+      </span>
+    </div>
+    {% if run.error %}<p class="note"><code>{{ run.error }}</code></p>{% endif %}
+  </div>
+
+  <div class="card">
+    <span class="name">Items this run created</span>
+    <div class="table-wrap" style="margin-top:10px">
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Relevance check</th><th>Transcript</th><th class="num">Claims</th><th class="num">Cost</th></tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <td>
+                <a href="{% url 'ops-item' item.pk %}">{{ item.title|truncatechars:90 }}</a>
+                <div class="note" style="margin-top:2px">
+                  {{ item.creator|default:"unattributed" }}{% if item.published_at %} · {{ item.published_at|date:"j M Y" }}{% endif %}
+                </div>
+              </td>
+              <td>
+                {% if item.gate_decision == "relevant" %}<span class="state stored">relevant</span>
+                {% elif item.gate_decision == "sampled" %}<span class="state env">set aside, sampled anyway</span>
+                {% elif item.gate_decision == "rejected" %}<span class="state missing">set aside</span>
+                {% else %}<span class="state missing">not yet screened</span>{% endif %}
+                {% if item.gate_reason %}<div class="note" style="margin-top:2px">{{ item.gate_reason|truncatechars:140 }}</div>{% endif %}
+              </td>
+              <td>
+                {% if item.content_state == "transcribed" %}
+                  <span class="state stored">{{ item.transcript.get_method_display }}</span>
+                {% elif item.content_state == "metadata" %}
+                  <span class="state missing">metadata only</span>
+                {% elif item.latest_attempt %}
+                  <span class="state env">{{ item.latest_attempt.outcome }}</span>
+                {% else %}
+                  <span class="state missing">—</span>
+                {% endif %}
+              </td>
+              <td class="num">{{ item.claim_count }}</td>
+              <td class="num">${{ item.total_cost|floatformat:3 }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="empty">This run created no new items{% if run.items_seen_before %} — everything it found was already held{% endif %}.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

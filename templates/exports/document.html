@@ -9,7 +9,7 @@ the nav, the sign-out button, the operator's own email address.
 CSS is inline for the same reason the operator shell's is: a worker rendering a
 PDF has no static-file pipeline, and a stylesheet that resolves in development
 and 404s in a container is a failure that only shows up in the artefact.
-{% endcomment %}<!doctype html>
+{% endcomment %}{% load export_text %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -68,6 +68,7 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     page-break-after: avoid;
   }
   p { margin: 0 0 9pt; orphans: 2; widows: 2; }
+  a { color: #1f5140; }
   ul { margin: 0 0 9pt; padding-left: 16pt; }
   li { margin-bottom: 4pt; }
   .provenance {
@@ -81,7 +82,7 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
 </style>
 </head>
 <body>
-  {% if document.is_draft %}<div class="notice">{{ document.notice }}</div>{% endif %}
+  {% if document.has_notice %}<div class="notice">{{ document.notice }}</div>{% endif %}
 
   <h1>{{ document.title }}</h1>
   <p class="meta">
@@ -94,9 +95,9 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     <h2>{{ section.heading }}</h2>
     {% for block in section.blocks %}
       {% if block.is_bullets %}
-        <ul>{% for item in block.items %}<li>{{ item }}</li>{% endfor %}</ul>
+        <ul>{% for item in block.items %}<li>{{ item|linked }}</li>{% endfor %}</ul>
       {% else %}
-        <p>{{ block.text }}</p>
+        <p>{{ block.text|linked }}</p>
       {% endif %}
     {% endfor %}
   {% endfor %}

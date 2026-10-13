@@ -39,28 +39,35 @@ from django.contrib import messages
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views import View
 
+from apps.enrichment.domain import DOMAIN_PACK_VERSION
 from apps.operations.models import AuditEvent
 from apps.operations.permissions import require_platform_admin
-from apps.tenancy.context import operator_scope, scoped
-from apps.tenancy.models import Organization
-
 from apps.outputs import exports, services
 from apps.outputs.exports.adapters import document_for_version
 from apps.outputs.models import (
     ExportArtifact,
     Output,
-    OutputState,
     OutputType,
     OutputVersion,
 )
+from apps.tenancy.context import operator_scope, scoped
+from apps.tenancy.models import Organization
 
 logger = logging.getLogger(__name__)
 
 
 def _actor(request) -> str:
     return getattr(request.user, "email", str(request.user))
+
+
+#: The output types something can actually draft today. The other types are
+#: real states in the model and appear in the form, disabled and marked, rather
+#: than producing a trend brief under another type's name — which is what the
+#: form used to do, and why the type list said nothing about what was built.
+GENERATED_TYPES = frozenset({OutputType.TREND_BRIEF, OutputType.CONTENT_BRIEF})
 
 
 class OutputListView(View):
@@ -81,51 +88,92 @@ class OutputListView(View):
             {
                 "outputs": rows,
                 "organizations": organizations,
-                "types": OutputType.choices,
+                "types": [
+                    (value, label, value in GENERATED_TYPES)
+                    for value, label in OutputType.choices
+                ],
             },
         )
 
     def post(self, request):
-        """Draft one from the client's own evidence."""
-        require_platform_admin(request, action="Drafting an output")
+        """Draft a trend brief or a content brief from what has been approved.
 
-        title = (request.POST.get("title") or "").strip()
+        Also the target of the "Draft the brief" button on Triage and the
+        "Draft a content brief" button on Signal Review, which post the client
+        and type and leave the title to its default.
+        """
+        require_platform_admin(request, action="Drafting an output")
+        back = redirect(reverse("ops-outputs"))
+
         slug = request.POST.get("organization") or ""
         type_ = request.POST.get("type") or OutputType.TREND_BRIEF
-
-        if not title:
-            messages.error(request, "Give the output a title.")
-            return redirect(reverse("ops-outputs"))
+        if type_ not in GENERATED_TYPES:
+            label = dict(OutputType.choices).get(type_, type_)
+            messages.error(
+                request,
+                f"{label} cannot be drafted yet — only the trend brief and the content "
+                f"brief have generators.",
+            )
+            return back
 
         with operator_scope():
             organization = Organization.objects.filter(slug=slug).first()
         if organization is None:
             messages.error(request, "Choose a client.")
-            return redirect(reverse("ops-outputs"))
+            return back
 
-        from apps.outputs.drafting import sections_for
+        from apps.outputs import briefing, content_brief
+        from apps.scoring.models import Recommendation
 
+        title = (request.POST.get("title") or "").strip()
+        summary = (request.POST.get("summary") or "").strip()
         with scoped(organization):
             try:
-                sections = sections_for(organization)
+                if type_ == OutputType.CONTENT_BRIEF:
+                    recommendation = Recommendation.objects.filter(
+                        organization=organization, pk=request.POST.get("recommendation") or 0
+                    ).select_related("signal", "profile").first()
+                    if recommendation is None:
+                        raise services.DraftingError(
+                            "Choose the approved recommendation the content brief is for — "
+                            "the button on its Signal Review page does this for you."
+                        )
+                    sections, working_title, profile = content_brief.sections_for(
+                        organization, recommendation
+                    )
+                    title = title or working_title
+                    summary = summary or f"Content brief for {recommendation.signal.code}."
+                else:
+                    brief = briefing.sections_for_brief(organization)
+                    sections, profile = brief.sections, brief.profile
+                    title = title or (
+                        f"{organization.name} — trend brief, {timezone.now():%-d %B %Y}"
+                    )
+                    summary = summary or brief.summary
+
                 version = services.draft(
                     organization,
                     type=type_,
                     title=title,
                     sections=sections,
-                    summary=(request.POST.get("summary") or "").strip(),
+                    summary=summary,
                     actor_label=_actor(request),
+                    # PRD §8: the profile version the approved recommendations
+                    # were made against.
+                    client_profile_version=profile,
+                    domain_pack_version=DOMAIN_PACK_VERSION,
+                    is_illustrative=bool(request.POST.get("is_illustrative")),
                 )
             except services.DraftingError as exc:
-                # Both of its refusals are already operator-facing prose: no
-                # active profile, or nothing in the corpus matched one.
+                # Every refusal is already written for the operator: nothing
+                # approved yet, no recommendation chosen, or the model failed.
                 messages.error(request, str(exc))
-                return redirect(reverse("ops-outputs"))
+                return back
 
         messages.success(
             request,
-            f"Drafted “{title}” v{version.number} from {len(sections)} section(s). "
-            f"Read it before approving — nothing here has been reviewed yet.",
+            f"Drafted “{title}” v{version.number}. Read it before approving — the "
+            f"developments in it were approved, this document has not been.",
         )
         return redirect(reverse("ops-output", args=[version.output_id]))
 

@@ -1,0 +1,91 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Ingestion runs (PRD §6.5). The coverage card answers "how much of what matters
+did we actually read?"; the table answers "what happened on each poll?".
+{% endcomment %}
+{% block title %}Runs{% endblock %}
+
+{% block content %}
+  <h1>Collection runs</h1>
+  <p class="lede">
+    Every poll of every source: what it found, what the relevance check kept, what
+    was transcribed, and what it cost. Open a run to see each item.
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Last {{ coverage_days }} days</span>
+      <span class="state">by date collected</span>
+    </div>
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b>{{ coverage.collected }}</b><span>collected</span></div>
+      <div class="stat"><b>{{ coverage.relevant }}</b><span>judged relevant</span></div>
+      <div class="stat"><b>{{ coverage.rejected }}</b><span>set aside before any cost</span></div>
+      <div class="stat">
+        <b>{% if coverage.coverage_pct is not None %}{{ coverage.coverage_pct }}%{% else %}—{% endif %}</b>
+        <span>of relevant items transcribed</span>
+      </div>
+      <div class="stat"><b>{{ coverage.claims }}</b><span>claims extracted</span></div>
+    </div>
+    <p class="note">
+      Of the {{ coverage.relevant }} relevant: {{ coverage.transcribed }} transcribed,
+      {{ coverage.metadata_only }} metadata only (no transcript route could serve them),
+      {{ coverage.awaiting }} still waiting.
+      {% if coverage.pending %}{{ coverage.pending }} item(s) have not been screened yet.{% endif %}
+    </p>
+  </div>
+
+  <div class="card">
+    <form method="get" class="inline">
+      <label for="source" style="margin:0">Source</label>
+      <select id="source" name="source">
+        <option value="">All sources</option>
+        {% for s in sources %}
+          <option value="{{ s.pk }}" {% if source and s.pk == source.pk %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="small">Show</button>
+    </form>
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead>
+          <tr>
+            <th>Started</th><th>Source</th><th>Result</th>
+            <th class="num">Found</th><th class="num">New</th>
+            <th class="num">Relevant</th><th class="num">Set aside</th>
+            <th class="num">Transcribed</th><th class="num">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in runs %}
+            <tr>
+              <td><a href="{% url 'ops-run' row.obj.pk %}">{{ row.obj.started_at|date:"j M, H:i" }}</a></td>
+              <td>{{ row.obj.source.name }}</td>
+              <td>
+                {% if row.obj.status == "succeeded" %}<span class="state stored">succeeded</span>
+                {% elif row.obj.status == "running" %}<span class="state env">running</span>
+                {% else %}
+                  <span class="state unreadable">failed{% if row.obj.blocking %} · needs attention{% endif %}</span>
+                  {% if row.obj.error %}<div class="note" style="margin-top:2px">{{ row.obj.error|truncatechars:120 }}</div>{% endif %}
+                {% endif %}
+              </td>
+              <td class="num">{{ row.obj.items_collected }}</td>
+              <td class="num">{{ row.obj.items_created }}</td>
+              <td class="num">{{ row.relevant }}</td>
+              <td class="num">{{ row.rejected }}</td>
+              <td class="num">{{ row.transcribed }}</td>
+              <td class="num">${{ row.cost|floatformat:2 }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="9" class="empty">No runs yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      Cost is what each run's new items have cost so far — screening, transcripts and
+      claim extraction — so it grows for a while after the run itself finishes.
+      Runs before 12 October did not record found/new counts.
+    </p>
+  </div>
+{% endblock %}

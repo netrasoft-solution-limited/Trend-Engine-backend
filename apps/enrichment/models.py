@@ -34,6 +34,9 @@ class ModelRun(models.Model):
         RELEVANCE_GATE = "relevance_gate", "Relevance gate"
         #: Stronger tier, full text, once per item ever.
         EXTRACTION = "extraction", "Extraction"
+        #: Grouping claims across sources into signals. Corpus-wide, so no
+        #: content item; one call per detection run.
+        DETECTION = "detection", "Signal detection"
         #: Strongest tier, client-facing (Arch §10.3).
         DRAFTING = "drafting", "Drafting"
 

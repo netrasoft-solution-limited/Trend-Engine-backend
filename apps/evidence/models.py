@@ -18,8 +18,14 @@ minimum the relevance gate and extraction need. MetricSnapshot and Tombstone
 from __future__ import annotations
 
 import hashlib
+from urllib.parse import urlsplit
 
 from django.db import models
+
+#: How many ladder walks an item keeps. A retryable item can be walked on every
+#: poll; the recent history answers "why no transcript yet" without growing
+#: without bound.
+MAX_TRANSCRIPT_ATTEMPTS = 10
 
 
 class ContentItem(models.Model):
@@ -95,6 +101,12 @@ class ContentItem(models.Model):
     #: Which fallback rung produced the content — Arch §7.2 requires the route
     #: to be attributable per item, for provenance and for cost.
     acquisition_route = models.CharField(max_length=64, blank=True)
+    #: Every walk of the transcript fallback ladder, oldest first: when, each
+    #: step's outcome in its own words, and what it produced. PRD §14 asks that
+    #: every item show its transcript source, method, status and cost; the
+    #: winning step alone cannot say why the cheaper ones were passed over.
+    #: Capped at the last `MAX_TRANSCRIPT_ATTEMPTS` walks.
+    transcript_attempts = models.JSONField(default=list, blank=True)
     raw_metadata = models.JSONField(default=dict, blank=True)
     #: PRD §7.2: no connector runs without a recorded policy and access basis.
     policy = models.ForeignKey(
@@ -125,6 +137,23 @@ class ContentItem(models.Model):
         """Arch §7.1: metadata-only items must be surfaced honestly as such,
         never presented as fully understood content. Extraction skips them."""
         return self.content_state != self.ContentState.TRANSCRIBED
+
+    def link_at(self, seconds: float | None) -> str:
+        """The source URL, opened at a moment where the platform supports it.
+
+        YouTube honours `t=`, so a reader can check a quote in one click.
+        Podcast episode pages have no common convention, so they get the plain
+        URL and the reader is given the timestamp alongside it.
+        """
+        if not self.url:
+            return ""
+        if seconds is None or seconds < 0:
+            return self.url
+        host = urlsplit(self.url).netloc.lower()
+        if host.endswith("youtube.com") or host.endswith("youtu.be"):
+            separator = "&" if "?" in self.url else "?"
+            return f"{self.url}{separator}t={int(seconds)}s"
+        return self.url
 
     @staticmethod
     def hash_content(*parts: str) -> str:

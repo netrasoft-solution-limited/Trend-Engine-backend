@@ -29,6 +29,7 @@ def document_for_version(version, *, is_draft: bool | None = None) -> ExportDocu
         summary=version.summary,
         body=version.body,
         is_draft=is_draft,
+        is_illustrative=output.is_illustrative,
         dated=None,
         provenance=Provenance(
             version_number=version.number,

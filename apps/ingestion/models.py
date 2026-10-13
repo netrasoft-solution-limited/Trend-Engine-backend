@@ -5,8 +5,8 @@ PRD §8 models: IngestionRun, RawItem.
 Tenant-agnostic by design. Nothing in this app may import from
 clients, scoring, outputs, publication, portal or billing (Arch §4).
 
-Only `IngestionRun` exists so far, with the fields the Triage home's failure
-count needs. RawItem, per-run counters and cost are not modelled yet.
+Only `IngestionRun` exists so far. RawItem is not modelled; per-item cost is
+read from the items a run created rather than stored twice here.
 """
 from __future__ import annotations
 
@@ -30,6 +30,16 @@ class IngestionRun(models.Model):
     #: scheduled run will simply retry. Only failed AND blocking runs count as
     #: blocking failures on the Triage home.
     blocking = models.BooleanField(default=False)
+
+    #: What the poll returned, what was new, and what the idempotency key had
+    #: already seen. "Collected 12, 0 new" and "collected nothing" are different
+    #: facts about a source, and only the counts tell them apart.
+    items_collected = models.PositiveIntegerField(default=0)
+    items_created = models.PositiveIntegerField(default=0)
+    items_seen_before = models.PositiveIntegerField(default=0)
+    #: Why a failed run failed, in the vendor's or the config's own words.
+    #: A failure the screen cannot explain sends the operator to the logs.
+    error = models.TextField(blank=True)
 
     class Meta:
         ordering = ("-started_at",)

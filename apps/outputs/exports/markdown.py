@@ -15,7 +15,7 @@ EXTENSION = "md"
 def render(document: ExportDocument) -> bytes:
     lines: list[str] = []
 
-    if document.is_draft:
+    if document.has_notice:
         # First line, not a footer. Someone who forwards the first screenful
         # has still forwarded the warning.
         lines += [f"> **{document.notice}**", ""]

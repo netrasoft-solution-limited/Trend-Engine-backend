@@ -1,11 +1,15 @@
 """Turning a section's text into blocks, once, for every format.
 
 `OutputVersion.body` and `Publication.body` are a list of `{"heading", "text"}`,
-and that `text` carries three conventions produced by `apps/outputs/drafting.py`:
+and that `text` carries four conventions produced by `apps/outputs/drafting.py`
+and `apps/outputs/briefing.py`:
 
     paragraphs   separated by a blank line (\\n\\n)
     bullets      lines beginning with "·", single-newline separated
     quotes       curly, inside the prose
+    links        [label](https://…), inline — Markdown's own syntax, so the
+                 Markdown export needs no translation and every other format
+                 reads it through `spans()`
 
 Nothing declares those conventions anywhere. If each of five renderers reads
 them independently, one body produces five different documents, and the binary
@@ -27,6 +31,10 @@ from dataclasses import dataclass
 BULLET = "·"
 
 _WHITESPACE_ONLY = re.compile(r"^\s*$")
+
+#: Only http(s). A `javascript:` or `file:` target in client-facing content is
+#: either a mistake or an attack, and either way it stays plain text.
+_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
 
 
 @dataclass(frozen=True)
@@ -119,4 +127,29 @@ def plain(text: str) -> str:
             parts.extend(block.items)
         else:
             parts.append(block.text)
-    return "\n".join(parts)
+    return unlinked("\n".join(parts))
+
+
+@dataclass(frozen=True)
+class Span:
+    text: str
+    href: str = ""
+
+
+def spans(text: str) -> tuple[Span, ...]:
+    """A line of prose as text and link runs, for formats that render links."""
+    out: list[Span] = []
+    position = 0
+    for match in _LINK.finditer(text or ""):
+        if match.start() > position:
+            out.append(Span(text[position:match.start()]))
+        out.append(Span(match.group(1), match.group(2)))
+        position = match.end()
+    if position < len(text or ""):
+        out.append(Span(text[position:]))
+    return tuple(out)
+
+
+def unlinked(text: str) -> str:
+    """Links written out as "label (url)", for formats with no hyperlinks."""
+    return _LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})", text or "")

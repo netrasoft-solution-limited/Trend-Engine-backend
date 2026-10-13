@@ -142,6 +142,9 @@ class Command(BaseCommand):
                     "first_seen_at": PREVIOUS_DIGEST_AT + timedelta(hours=6 + 8 * n),
                     "awaiting_operator_judgment": "review" in flags,
                     "needs_scientific_routing": "research" in flags,
+                    # Hand-written numbers, not detected ones — labelled as such
+                    # wherever a signal is shown.
+                    "is_illustrative": True,
                 },
             )
             self._score(jarrow, signal, fit, confidence)

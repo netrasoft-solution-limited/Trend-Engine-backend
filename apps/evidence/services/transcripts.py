@@ -39,9 +39,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.connectors.chains import DEFAULT_CHAINS, TERMINAL_STEP
-from apps.evidence.models import ContentItem, TranscriptArtifact
+from apps.evidence.models import MAX_TRANSCRIPT_ATTEMPTS, ContentItem, TranscriptArtifact
 
 logger = logging.getLogger(__name__)
 
@@ -354,8 +355,35 @@ def acquire(item: ContentItem) -> Acquisition:
     if not outcome.succeeded and not outcome.retryable:
         _mark_metadata_only(item)
 
+    _record_attempt(item, outcome)
     logger.info("Transcript ladder for item %s: %s", item.pk, outcome)
     return outcome
+
+
+def _record_attempt(item: ContentItem, outcome: Acquisition) -> None:
+    """Keep the walk on the item, not only in a log line.
+
+    The log is where this used to end, which meant "why did this episode cost
+    $0.15 when the YouTube one was free?" could only be answered by whoever had
+    the server logs. The Ingestion Runs screen reads this instead.
+    """
+    attempt = {
+        "at": timezone.now().isoformat(timespec="seconds"),
+        "method": outcome.method or "",
+        "chars": outcome.chars,
+        "cost_usd": str(outcome.cost_usd),
+        "outcome": (
+            "transcribed" if outcome.succeeded
+            else "will retry" if outcome.retryable
+            else "metadata only"
+        ),
+        "steps": [
+            {"step": r.step, "status": r.status, "detail": r.detail} for r in outcome.rungs
+        ],
+    }
+    attempts = [*(item.transcript_attempts or []), attempt][-MAX_TRANSCRIPT_ATTEMPTS:]
+    ContentItem.objects.filter(pk=item.pk).update(transcript_attempts=attempts)
+    item.transcript_attempts = attempts
 
 
 @transaction.atomic

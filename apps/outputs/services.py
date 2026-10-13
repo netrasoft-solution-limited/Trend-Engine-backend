@@ -65,6 +65,7 @@ def draft(
     actor_label: str,
     client_profile_version: str = "",
     domain_pack_version: str = "",
+    is_illustrative: bool = False,
 ) -> OutputVersion:
     """A new version of an output, in DRAFT.
 
@@ -89,6 +90,9 @@ def draft(
             "state": OutputState.DRAFTING,
             "client_profile_version": client_profile_version,
             "domain_pack_version": domain_pack_version,
+            # A fixture organisation's outputs are never real findings, whatever
+            # the caller passed.
+            "is_illustrative": is_illustrative or organization.is_fixture,
         },
     )
 

@@ -38,7 +38,37 @@ remember which screen does what.
           {% csrf_token %}<button type="submit" class="secondary">Draft a new version</button>
         </form>
       </div>
+    {% else %}
+      <p class="note">
+        Start one by hand and add what they sell, import a product list below, or
+        read their storefront. Nothing is scored until a version is made live.
+      </p>
+      <form method="post" action="{% url 'ops-client-profile-draft' organization.slug %}">
+        {% csrf_token %}
+        <div class="actions"><button type="submit">Start a profile by hand</button></div>
+      </form>
     {% endif %}
+  </div>
+
+  <div class="card">
+    <span class="name">Import a product list or profile</span>
+    <p class="note">
+      A <b>CSV product list</b> with a <code>name</code> column (optional:
+      <code>kind</code>, <code>terms</code> separated by <code>;</code>,
+      <code>weight</code>) is added to a copy of the live profile. A
+      <b>JSON profile</b> — the file the Export link on any version downloads —
+      replaces it whole. Either way you get a draft to review; nothing goes live
+      until you say so.
+    </p>
+    <form method="post" action="{% url 'ops-client-profile-import' organization.slug %}"
+          enctype="multipart/form-data">
+      {% csrf_token %}
+      <label for="file">File</label>
+      <input type="file" id="file" name="file" accept=".csv,.json,text/csv,application/json" required>
+      <label for="label">Why this version exists (optional)</label>
+      <input type="text" id="label" name="label" placeholder="Product list from Jarrow, October">
+      <div class="actions"><button type="submit">Import as a draft</button></div>
+    </form>
   </div>
 
   <div class="card">
@@ -79,7 +109,7 @@ remember which screen does what.
           </tr>
         {% empty %}
           <tr><td colspan="5" class="empty">
-            No profile yet. Read their storefront above, or draft one by hand.
+            No profile yet — start one by hand, import a list, or read their storefront above.
           </td></tr>
         {% endfor %}
       </tbody>

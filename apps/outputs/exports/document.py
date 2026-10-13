@@ -42,6 +42,11 @@ RENDERER_VERSION = "1"
 #: restoration of the backstop that the portal used to provide.
 DRAFT_NOTICE = "DRAFT — NOT PUBLISHED"
 
+#: Shown on demonstration or test content. Mark's 8 October review asked for
+#: illustrative records to be labelled; a label that lived only in the app would
+#: be lost the moment the file was forwarded.
+ILLUSTRATIVE_NOTICE = "ILLUSTRATIVE — DEMONSTRATION CONTENT, NOT A FINDING"
+
 #: Used as document metadata when there is no publication date. Any fixed
 #: value; what matters is that it is not the clock.
 STABLE_FALLBACK_DATE = date(1980, 1, 1)
@@ -79,10 +84,20 @@ class ExportDocument:
     is_draft: bool = True
     dated: date | None = None
     provenance: Provenance = field(default_factory=Provenance)
+    is_illustrative: bool = False
 
     @property
     def notice(self) -> str:
-        return DRAFT_NOTICE if self.is_draft else ""
+        """Every warning the document carries, on one line. Renderers print
+        this when `has_notice`; none of them decides on its own which apply."""
+        parts = [ILLUSTRATIVE_NOTICE] if self.is_illustrative else []
+        if self.is_draft:
+            parts.append(DRAFT_NOTICE)
+        return " · ".join(parts)
+
+    @property
+    def has_notice(self) -> bool:
+        return self.is_draft or self.is_illustrative
 
     @property
     def metadata_date(self) -> str:
@@ -121,6 +136,7 @@ def document_from_body(
     is_draft: bool = True,
     dated: date | None = None,
     provenance: Provenance | None = None,
+    is_illustrative: bool = False,
 ) -> ExportDocument:
     """Build a document from the stored `body` shape.
 
@@ -141,4 +157,5 @@ def document_from_body(
         is_draft=is_draft,
         dated=dated,
         provenance=provenance or Provenance(),
+        is_illustrative=is_illustrative,
     )

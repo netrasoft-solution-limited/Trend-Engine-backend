@@ -305,7 +305,7 @@ def test_a_client_with_no_profile_is_refused_rather_than_sent_a_generic_brief(or
     reads well, and is identical to every other client's."""
     from apps.outputs.services import DraftingError
 
-    with scoped(org_a), pytest.raises(DraftingError, match="no active client profile"):
+    with scoped(org_a), pytest.raises(DraftingError, match="no live client profile"):
         drafting.sections_for(org_a)
 
 

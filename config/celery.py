@@ -41,6 +41,8 @@ app.conf.task_routes = {
     # these fall through to `default`, where they would sit behind exports.
     "apps.evidence.tasks.*": {"queue": "ingest"},
     "apps.enrichment.tasks.*": {"queue": "enrich"},
+    "apps.intelligence.tasks.*": {"queue": "enrich"},
+    "apps.scoring.tasks.*": {"queue": "enrich"},
     "apps.clients.tasks.*": {"queue": "default"},
     "apps.outputs.tasks.*": {"queue": "default"},
     "apps.publication.tasks.*": {"queue": "default"},
@@ -77,6 +79,13 @@ app.conf.beat_schedule = {
     "assess-pending-relevance": {
         "task": "apps.enrichment.tasks.assess_pending",
         "schedule": crontab(minute="*/30"),
+    },
+    # Daily, after the overnight polls have been screened, transcribed and
+    # extracted. Also rescoring: momentum and recency move with the calendar
+    # even on a day with no new evidence.
+    "detect-signals": {
+        "task": "apps.intelligence.tasks.detect_signals",
+        "schedule": crontab(hour=6, minute=0),
     },
     # Arch §11.3. 03:00 UTC is after the night's ingestion has settled and well
     # before anyone is working.

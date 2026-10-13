@@ -154,6 +154,20 @@ def test_a_successful_poll_records_a_run_and_a_success(source, gated, monkeypatc
     assert source.last_success_at is not None
 
 
+def test_a_run_records_what_it_found_what_was_new_and_what_was_held(source, gated, monkeypatch):
+    """"Collected 12, none new" and "collected nothing" are different facts about
+    a source; the runs screen can only tell them apart from these counts."""
+    monkeypatch.setattr(collection, "collect", lambda s, **kw: rows("ep-1"))
+    tasks.poll_source(source.pk)
+    monkeypatch.setattr(collection, "collect", lambda s, **kw: rows("ep-1", "ep-2", "ep-3"))
+
+    tasks.poll_source(source.pk)
+    run = IngestionRun.objects.latest("started_at")
+
+    assert (run.items_collected, run.items_created, run.items_seen_before) == (3, 2, 1)
+    assert run.error == ""
+
+
 def test_a_poll_that_finds_nothing_is_still_a_success(source, gated, monkeypatch):
     """A quiet publisher is not a failure, and the Ingestion Runs screen has to
     tell the two apart."""
@@ -189,6 +203,7 @@ def test_a_misconfigured_source_fails_blocking_and_does_not_retry(source, monkey
     assert result["blocking"] is True
     assert run.status == IngestionRun.Status.FAILED
     assert run.blocking is True
+    assert run.error == "no rss_url or series_name", "the screen shows why, not just that"
     assert source.last_polled_at is not None, "a failed attempt still moves due-ness"
     assert source.last_success_at is None
 
@@ -216,6 +231,7 @@ def test_a_vendor_outage_fails_non_blocking_and_retries(source, monkeypatch):
     assert run.status == IngestionRun.Status.FAILED
     assert run.blocking is False, "a vendor outage is not a blocking failure"
     assert retried
+    assert run.error == "RuntimeError: Taddy 503"
 
 
 def test_a_missing_source_is_not_an_error():

@@ -21,25 +21,15 @@ from apps.evidence.models import ContentItem
 from apps.evidence.services import transcripts
 
 from . import extraction, gate
+from .domain import domain_pack
 from .llm.costs import CostCapExceeded
 
 logger = logging.getLogger(__name__)
 
 
 def _domain_pack() -> str:
-    """The taxonomy the gate and extractor are given.
-
-    A literal for now. `apps.domains` will own the versioned pack (PRD §5
-    principle 4 keeps supplements-specific concepts out of the core schema),
-    and when it does this function is the single place that changes.
-    """
-    return (
-        "Dietary supplements and nutraceuticals: ingredients, formulations, "
-        "dosing protocols, mechanisms of action, clinical evidence, safety and "
-        "interactions, category and brand movements, and the consumer questions "
-        "around them. Adjacent: sports nutrition, healthy ageing, gut health, "
-        "cognition, sleep, micronutrients."
-    )
+    """Kept as the name the tasks below call; the text lives in `domain.py`."""
+    return domain_pack()
 
 
 @shared_task(bind=True, name="apps.enrichment.tasks.assess_relevance")

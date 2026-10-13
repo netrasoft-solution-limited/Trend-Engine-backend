@@ -10,8 +10,11 @@ candidates since the last digest", and a digest summarises signals, which are
 global — so it cannot live at L5 or above without pulling tenant context into
 a global count.
 
-Only the fields the Triage home summary needs exist so far. SignalEvidence,
-score components and suggested actions are not modelled yet.
+A signal is DETECTED, not entered: `detection.py` groups claims from different
+sources into a development, and `components.py` scores it. Every number on a
+signal is stored with the inputs it came from (Arch §8.2), because a score that
+cannot be explained at the moment someone asks about it cannot be explained
+later either. Suggested actions are per client and live in `apps.scoring`.
 """
 from __future__ import annotations
 
@@ -30,6 +33,17 @@ class Signal(models.Model):
     ranking that combines the two lives in `apps.scoring.ranking`, because this
     layer may not import tenant-scoped code.
     """
+
+    class Type(models.TextChoices):
+        """PRD §6.3's signal types."""
+
+        RISING_TOPIC = "rising_topic", "Rising, new or resurfacing topic"
+        CONVERGENCE = "convergence", "Cross-source convergence"
+        COMPETITOR_MOVE = "competitor_move", "Competitor move"
+        CONSUMER_QUESTION = "consumer_question", "Recurring consumer question or unmet need"
+        ASSET_OPPORTUNITY = "asset_opportunity", "Product or asset opportunity"
+        CONTRADICTION = "contradiction", "Contradiction, safety issue or correction"
+        RESEARCH = "research", "New research or trial update"
 
     class State(models.TextChoices):
         # Values match the strings the ops frontend already renders
@@ -57,6 +71,43 @@ class Signal(models.Model):
     #: shared by all tenants (Arch §8.1).
     domain_score = models.PositiveSmallIntegerField(validators=SCORE_VALIDATORS)
 
+    # ── What it is ──────────────────────────────────────────────────────────
+    signal_type = models.CharField(max_length=32, choices=Type.choices, blank=True)
+    #: What changed, in one or two plain sentences. Written at detection from
+    #: the supporting claims and nothing else.
+    statement = models.TextField(blank=True)
+
+    # ── Why it scored what it did (Arch §8.2) ───────────────────────────────
+    #: `{component: {"weight", "value" | None, "detail"}}`. `value` is None when
+    #: the input does not exist yet — no baseline, no engagement metrics — and
+    #: the domain score is then the weighted mean of what IS available, which
+    #: `components_available` makes visible rather than leaving as a quiet gap.
+    components = models.JSONField(default=dict, blank=True)
+    #: Weekly item counts behind momentum and acceleration, and how long the
+    #: corpus has been watched — the measurement the score was taken against.
+    baseline = models.JSONField(default=dict, blank=True)
+    #: PRD §6.3: confidence is tracked separately from importance.
+    confidence = models.PositiveSmallIntegerField(default=0, validators=SCORE_VALIDATORS)
+    confidence_reasons = models.JSONField(default=list, blank=True)
+    source_count = models.PositiveSmallIntegerField(default=0)
+    creator_count = models.PositiveSmallIntegerField(default=0)
+    item_count = models.PositiveSmallIntegerField(default=0)
+
+    # ── Provenance ──────────────────────────────────────────────────────────
+    detected_by = models.ForeignKey(
+        "enrichment.ModelRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="signals",
+    )
+    prompt_version = models.CharField(max_length=64, blank=True)
+    domain_pack_version = models.CharField(max_length=64, blank=True)
+    scored_at = models.DateTimeField(null=True, blank=True)
+    #: Seeded or demonstration signals. They carry the label everywhere they are
+    #: shown, so a hand-written number is never mistaken for a detected one.
+    is_illustrative = models.BooleanField(default=False)
+
     class Meta:
         ordering = ("-domain_score", "code")
         indexes = [
@@ -71,6 +122,41 @@ class Signal(models.Model):
 
     def __str__(self) -> str:
         return f"{self.code} — {self.title}"
+
+    @property
+    def components_available(self) -> tuple[int, int]:
+        """(available, total) — how much of the score rests on measured inputs."""
+        values = list((self.components or {}).values())
+        return sum(1 for c in values if c.get("value") is not None), len(values)
+
+
+class SignalEvidence(models.Model):
+    """One claim behind one signal, and which way it points.
+
+    Contradicting claims are kept, not discarded — PRD §6.3: "retain
+    contradictions rather than discarding them". A signal whose evidence all
+    agrees and one with three dissenting experts are different findings.
+    """
+
+    class Role(models.TextChoices):
+        SUPPORTS = "supports", "Supports"
+        CONTRADICTS = "contradicts", "Contradicts"
+
+    signal = models.ForeignKey(Signal, on_delete=models.CASCADE, related_name="evidence")
+    claim = models.ForeignKey(
+        "enrichment.Claim", on_delete=models.CASCADE, related_name="signal_evidence"
+    )
+    role = models.CharField(max_length=16, choices=Role.choices, default=Role.SUPPORTS)
+    added_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ("signal", "role", "added_at")
+        constraints = [
+            models.UniqueConstraint(fields=["signal", "claim"], name="uniq_signal_claim"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.signal.code} {self.role} claim {self.claim_id}"
 
 
 class Digest(models.Model):

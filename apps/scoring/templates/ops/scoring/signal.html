@@ -1,0 +1,266 @@
+{% extends "ops/base.html" %}
+{% comment %}
+Signal review (PRD §6.5; Example Outputs A2). Read top to bottom it answers, in
+order: what changed, how much it is moving and on what evidence, how sure we
+are, why it is this client's business, what we recommend — and lets the
+operator decide each of those.
+{% endcomment %}
+{% block title %}{{ signal.code }} · {{ organization.name }}{% endblock %}
+
+{% block content %}
+  <h1>{{ signal.title }}</h1>
+  <p class="lede">
+    <a href="{% url 'ops-triage' organization.slug %}">← Triage for {{ organization.name }}</a> ·
+    {{ signal.code }}
+    {% if signal.signal_type %}· {{ signal.get_signal_type_display }}{% endif %}
+    · <b>{{ signal.get_state_display }}</b>
+    {% if signal.is_illustrative %}<span class="pill illustrative">illustrative — seeded, not detected</span>{% endif %}
+    {% if signal.needs_scientific_routing %}<span class="pill">needs expert review</span>{% endif %}
+  </p>
+
+  <div class="card">
+    <span class="name">What changed</span>
+    <p style="margin:8px 0 0">{{ signal.statement|default:"No statement recorded." }}</p>
+    <p class="note">
+      First detected {{ signal.first_seen_at|date:"j M Y" }}
+      {% if signal.scored_at %}· scored {{ signal.scored_at|date:"j M, H:i" }}{% endif %}
+      {% if signal.prompt_version %}· {{ signal.prompt_version }}{% endif %}
+      {% if signal.domain_pack_version %}· domain pack {{ signal.domain_pack_version }}{% endif %}
+    </p>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <span class="name">Signal score</span>
+        <span class="state"><b style="font-size:20px">{{ signal.domain_score }}</b> / 100</span>
+      </div>
+      <p class="note">
+        Rests on {{ available.0 }} of {{ available.1 }} components. Missing ones are
+        left out of the average rather than counted as zero.
+      </p>
+      <table>
+        <tbody>
+          {% for c in components %}
+            <tr>
+              <td style="width:40%">{{ c.label }} <span class="muted">· {{ c.weight }}%</span>
+                <div class="note" style="margin-top:2px">{{ c.detail }}</div>
+              </td>
+              <td style="width:40%;vertical-align:middle">
+                {% if c.value is not None %}<div class="bar"><i style="width:{{ c.value }}%"></i></div>
+                {% else %}<span class="muted">not available</span>{% endif %}
+              </td>
+              <td class="num" style="vertical-align:middle">{{ c.value|default_if_none:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="row">
+          <span class="name">Confidence</span>
+          <span class="state"><b style="font-size:20px">{{ signal.confidence }}</b> / 100</span>
+        </div>
+        <p class="note">How sure we are this is real — not how much it matters.</p>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:14px">
+          {% for reason in signal.confidence_reasons %}<li>{{ reason }}</li>{% empty %}<li class="muted">No reasons recorded.</li>{% endfor %}
+        </ul>
+      </div>
+
+      <div class="card">
+        <span class="name">Change over time</span>
+        <p class="note">Items per week that support it, oldest on the left, this week on the right.</p>
+        {% if weekly %}
+          <div class="spark" style="margin-top:10px">
+            {% for w in weekly %}<div><i style="height:{{ w.pct }}%"></i><span>{{ w.n }}</span></div>{% endfor %}
+          </div>
+        {% endif %}
+        <p class="note">
+          {{ signal.item_count }} item(s) from {{ signal.creator_count }} creator(s) across
+          {{ signal.source_count }} source type(s).
+          {% if signal.baseline.watching_since %}Collection began {{ signal.baseline.watching_since }} ({{ signal.baseline.watched_days }} days).{% endif %}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Why it is {{ organization.name }}'s business</span>
+      {% if score %}<span class="state"><b style="font-size:20px">{{ score.rank_score|default_if_none:"—" }}</b> rank · fit {{ score.fit_score }}</span>{% endif %}
+    </div>
+    {% if score %}
+      <table style="margin-top:8px">
+        <tbody>
+          {% for c in client_components %}
+            <tr>
+              <td style="width:40%">{{ c.label }} <span class="muted">· {{ c.weight }}%</span>
+                <div class="note" style="margin-top:2px">{{ c.detail }}</div>
+              </td>
+              <td style="width:40%;vertical-align:middle">
+                {% if c.value is not None %}<div class="bar"><i style="width:{{ c.value }}%"></i></div>{% endif %}
+              </td>
+              <td class="num" style="vertical-align:middle">{{ c.value|default_if_none:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if score.matches %}
+        <p class="note">
+          Matched:
+          {% for m in score.matches %}<b>{{ m.name }}</b> on “{{ m.term }}”{% if not forloop.last %} · {% endif %}{% endfor %}
+          {% if score.profile %}— profile {{ score.profile.citation }}{% endif %}
+        </p>
+      {% endif %}
+    {% else %}
+      <p class="note">Not ranked for this client yet. Re-rank from Triage.</p>
+    {% endif %}
+  </div>
+
+  <div class="card" id="recommendation">
+    <div class="row">
+      <span class="name">Recommendation for {{ organization.name }}</span>
+      {% if recommendation %}<span class="state env">{{ recommendation.get_state_display|lower }}</span>{% endif %}
+    </div>
+
+    {% if not recommendation %}
+      <p class="note">
+        None yet. Drafting makes one model call that sees this signal's evidence and
+        {{ organization.name }}'s profile — no other client's. Every action must cite the
+        evidence below, and only products in the profile may be named.
+      </p>
+      {% if not signal.is_illustrative %}
+        <form method="post">{% csrf_token %}
+          <div class="actions"><button type="submit" name="action" value="rec.draft">Draft a recommendation</button></div>
+        </form>
+      {% endif %}
+    {% else %}
+      <p style="margin:10px 0 4px"><b>Why it matters.</b> {{ recommendation.why_it_matters }}</p>
+      {% if recommendation.limits %}<p class="note"><b>What this does not prove.</b> {{ recommendation.limits }}</p>{% endif %}
+      {% if recommendation.products %}<p class="note"><b>Products:</b> {{ recommendation.products|join:", " }}</p>{% endif %}
+      <table style="margin-top:10px">
+        <thead><tr><th>Owner</th><th>Action</th><th>Success looks like</th><th>Rests on</th></tr></thead>
+        <tbody>
+          {% for a in recommendation.actions %}
+            <tr>
+              <td class="muted">{{ a.owner }}</td>
+              <td>{{ a.action }}</td>
+              <td class="muted">{{ a.success_measure }}</td>
+              <td>{% for id in a.claim_ids %}<a href="#c{{ id }}">C{{ id }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if recommendation.validation.invented_claim_ids or recommendation.validation.uncited_actions or recommendation.validation.unknown_products %}
+        <p class="note state env">
+          The validator removed:
+          {% if recommendation.validation.invented_claim_ids %}claim numbers outside this evidence ({{ recommendation.validation.invented_claim_ids|join:", " }}); {% endif %}
+          {% if recommendation.validation.uncited_actions %}{{ recommendation.validation.uncited_actions }} uncited action(s); {% endif %}
+          {% if recommendation.validation.unknown_products %}products not in the profile ({{ recommendation.validation.unknown_products|join:", " }}){% endif %}
+        </p>
+      {% endif %}
+      <p class="note">
+        {% if recommendation.edited_by_label %}Edited by {{ recommendation.edited_by_label }} · {% endif %}
+        {% if recommendation.decided_by_label %}{{ recommendation.get_state_display }} by {{ recommendation.decided_by_label }} {{ recommendation.decided_at|date:"j M, H:i" }} · {% endif %}
+        drafted {{ recommendation.created_at|date:"j M, H:i" }}{% if recommendation.model_run %} by {{ recommendation.model_run.model }}{% endif %}
+      </p>
+
+      {% if recommendation.state == "proposed" or recommendation.state == "operator edited" %}
+        <details style="margin-top:12px">
+          <summary>Edit</summary>
+          <form method="post" style="margin-top:8px">{% csrf_token %}
+            <label for="why">Why it matters</label>
+            <textarea id="why" name="why_it_matters">{{ recommendation.why_it_matters }}</textarea>
+            <label for="limits">What this does not prove</label>
+            <textarea id="limits" name="limits">{{ recommendation.limits }}</textarea>
+            {% if products %}
+              <label>Products</label>
+              {% for p in products %}
+                <label class="check"><input type="checkbox" name="products" value="{{ p }}" {% if p in recommendation.products %}checked{% endif %}> {{ p }}</label>
+              {% endfor %}
+            {% endif %}
+            <label>Actions — each must name the claims it rests on, e.g. “C12, C40”</label>
+            {% for a in action_rows %}
+              <div class="card" style="padding:10px;margin:6px 0">
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <select name="owner_{{ forloop.counter0 }}">
+                    {% for o in owners %}<option value="{{ o }}" {% if o == a.owner %}selected{% endif %}>{{ o }}</option>{% endfor %}
+                  </select>
+                  <input type="text" name="claims_{{ forloop.counter0 }}" value="{{ a.claims }}" placeholder="C12, C40" style="width:140px">
+                </div>
+                <textarea name="action_{{ forloop.counter0 }}" placeholder="The action" style="min-height:50px;margin-top:6px">{{ a.action }}</textarea>
+                <input type="text" name="measure_{{ forloop.counter0 }}" value="{{ a.success_measure }}" placeholder="Success looks like…" style="margin-top:6px">
+              </div>
+            {% endfor %}
+            <div class="actions"><button type="submit" name="action" value="rec.edit" class="secondary">Save edits</button></div>
+          </form>
+        </details>
+
+        <div class="actions" style="align-items:flex-start;flex-wrap:wrap">
+          <form method="post">{% csrf_token %}
+            <button type="submit" name="action" value="rec.approve">Approve for {{ organization.name }}</button>
+          </form>
+          <form method="post" class="inline">{% csrf_token %}
+            <input type="text" name="note" placeholder="Why reject?" style="width:220px">
+            <button type="submit" name="action" value="rec.reject" class="secondary">Reject</button>
+          </form>
+        </div>
+        <p class="note">Approving is not sending. It makes this available to a brief, which still goes through approval and the publication gate.</p>
+      {% endif %}
+    {% endif %}
+
+    {% if recommendation and recommendation.state == "approved" %}
+      <form method="post" action="{% url 'ops-outputs' %}" style="margin-top:12px">{% csrf_token %}
+        <input type="hidden" name="organization" value="{{ organization.slug }}">
+        <input type="hidden" name="type" value="content_brief">
+        <input type="hidden" name="recommendation" value="{{ recommendation.pk }}">
+        <button type="submit" class="secondary">Draft a content brief from this</button>
+        <span class="note">One model call; works only from what was approved above.</span>
+      </form>
+    {% endif %}
+
+    {% for old in history %}
+      <p class="note">Rejected {{ old.decided_at|date:"j M" }} by {{ old.decided_by_label }}: {{ old.decision_note }}</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <span class="name">Supporting evidence ({{ supporting|length }})</span>
+    {% include "ops/scoring/_evidence_rows.html" with rows=supporting organization=organization %}
+  </div>
+
+  <div class="card">
+    <span class="name">Contradicting evidence ({{ contradicting|length }})</span>
+    <p class="note">Kept, not discarded: disagreement is part of the finding.</p>
+    {% include "ops/scoring/_evidence_rows.html" with rows=contradicting organization=organization %}
+  </div>
+
+  <div class="card">
+    <span class="name">Decide on the signal</span>
+    <p class="note">
+      This is about the development itself and applies to every client. Rejecting or
+      reopening needs a reason.
+    </p>
+    {% if moves %}
+      <form method="post" class="inline" style="margin-top:8px">{% csrf_token %}
+        <input type="hidden" name="action" value="signal.move">
+        <input type="text" name="reason" placeholder="Reason (required to reject or reopen)" style="flex:1;min-width:220px">
+        {% for to, label in moves %}
+          <button type="submit" name="to" value="{{ to }}" class="small {% if to != 'approved' %}secondary{% endif %}">{{ label }}</button>
+        {% endfor %}
+      </form>
+    {% endif %}
+    {% if merge_targets and signal.state != "rejected" %}
+      <form method="post" class="inline" style="margin-top:10px">{% csrf_token %}
+        <input type="hidden" name="action" value="signal.merge">
+        <label for="into" style="margin:0">Duplicate of</label>
+        <select id="into" name="into">
+          {% for t in merge_targets %}<option value="{{ t.code }}">{{ t.code }} — {{ t.title|truncatechars:60 }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="small secondary">Merge into it</button>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}

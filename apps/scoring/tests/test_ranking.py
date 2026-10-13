@@ -99,7 +99,7 @@ def test_ranked_rows_carry_the_clients_fit_and_confidence(jarrow):
     with scoped(jarrow):
         top = ranked_candidates(jarrow).first()
 
-    assert (top.fit_score, top.confidence) == (82, 74)
+    assert (top.fit_score, top.client_confidence) == (82, 74)
 
 
 def test_ranking_without_a_bound_tenant_raises(jarrow):

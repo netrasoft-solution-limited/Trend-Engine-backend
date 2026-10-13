@@ -1,10 +1,11 @@
 """Candidate ranking — the one ordering the candidate list and the Triage
 summary's `top_candidate_id` must share.
 
-Domain score first (global), then this client's fit, then this client's
-confidence, all descending; `code` last so ties are deterministic. A candidate
-with no score for the client ranks after every scored candidate on the same
-domain score, rather than being dropped — it is still a candidate.
+For a client: PRD §6.3's client rank first (60% domain, 40% this client's
+relevance — `signal_rank.py`), then domain score, then fit, then confidence,
+all descending; `code` last so ties are deterministic. A signal with no
+computed rank — seeded, or not yet ranked — sorts after every ranked one and
+then by the older rule, rather than being dropped: it is still a candidate.
 
 With no client (`organization=None` — an operator looking across every
 tenant), fit and confidence have no single value, so the order is domain score
@@ -26,7 +27,9 @@ def ranked_candidates(organization=None) -> QuerySet[Signal]:
     """Candidate signals, best first.
 
     With an organisation, annotated with that client's `fit_score` and
-    `confidence`. Reads scores through the default-deny manager, so a tenant
+    `client_confidence` — named apart from `Signal.confidence`, which is the
+    signal's own confidence in its evidence and the same for every client.
+    Reads scores through the default-deny manager, so a tenant
     (or operator scope) must be bound — same as any other tenant-scoped read.
     """
     candidates = Signal.objects.filter(state=Signal.State.CANDIDATE)
@@ -35,11 +38,13 @@ def ranked_candidates(organization=None) -> QuerySet[Signal]:
 
     scores = ClientSignalScore.objects.for_organization(organization).filter(signal=OuterRef("pk"))
     return candidates.annotate(
+        rank_score=Subquery(scores.values("rank_score")[:1]),
         fit_score=Subquery(scores.values("fit_score")[:1]),
-        confidence=Subquery(scores.values("confidence")[:1]),
+        client_confidence=Subquery(scores.values("confidence")[:1]),
     ).order_by(
+        F("rank_score").desc(nulls_last=True),
         F("domain_score").desc(),
         F("fit_score").desc(nulls_last=True),
-        F("confidence").desc(nulls_last=True),
+        F("client_confidence").desc(nulls_last=True),
         "code",
     )

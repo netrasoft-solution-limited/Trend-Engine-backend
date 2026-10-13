@@ -368,3 +368,134 @@ def test_an_unknown_client_is_a_404(client, admin):
     client.force_login(admin)
 
     assert client.get(reverse("ops-client", args=["nobody"])).status_code == 404
+
+
+# ── Starting a profile, and importing one ───────────────────────────────────
+#
+# Mark's 8 October review: Jarrow had no profile, the page promised one could be
+# written by hand, and there was no button. The draft service always handled a
+# first version; only the page hid the way in.
+
+
+def test_a_client_with_no_profile_is_offered_a_way_to_start_one(client, admin, jarrow):
+    client.force_login(admin)
+
+    page = client.get(reverse("ops-client", args=[jarrow.slug])).content.decode()
+
+    assert "Start a profile by hand" in page
+    assert reverse("ops-client-profile-draft", args=[jarrow.slug]) in page
+
+
+def test_starting_a_first_profile_opens_an_empty_draft(client, admin, jarrow):
+    client.force_login(admin)
+
+    response = client.post(
+        reverse("ops-client-profile-draft", args=[jarrow.slug]), follow=True
+    )
+
+    assert "Started v1" in response.content.decode()
+    with scoped(jarrow):
+        version = ClientProfileVersion.objects.get()
+    assert version.number == 1 and not version.is_current
+
+
+def _upload(name: str, content: str):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    return SimpleUploadedFile(name, content.encode("utf-8"))
+
+
+PRODUCT_LIST = (
+    "Name,Kind,Terms,Weight\n"
+    "MagMind,product,magnesium l-threonate; threonate; magmind,90\n"
+    "Magnesium,product,,50\n"
+    "Women over 40,audience,menopause|perimenopause,60\n"
+)
+
+
+def test_a_csv_product_list_is_added_to_a_copy_of_the_live_profile(
+    client, admin, jarrow, live_profile
+):
+    """A product list is only products. Importing one must not drop the
+    audiences and priorities somebody wrote by hand."""
+    with scoped(jarrow):
+        ClientTerm.objects.create(
+            organization=jarrow, profile=live_profile, facet=ClientTerm.Facet.PRIORITY,
+            name="Sleep", terms=["sleep"],
+        )
+    client.force_login(admin)
+
+    client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]),
+        {"file": _upload("jarrow-products.csv", PRODUCT_LIST)},
+    )
+
+    with scoped(jarrow):
+        draft = ClientProfileVersion.objects.get(number=live_profile.number + 1)
+        assets = {a.name: a for a in draft.assets.all()}
+        terms = {(t.facet, t.name) for t in draft.terms.all()}
+        assert not draft.is_current, "an import is reviewed before it goes live"
+        assert set(assets) == {"Magnesium", "MagMind"}, "a name already present is not duplicated"
+        assert assets["MagMind"].terms == ["magnesium l-threonate", "threonate", "magmind"]
+        assert assets["MagMind"].weight == 90
+        assert ("priority", "Sleep") in terms, "the hand-written priority survives"
+        assert ("audience", "Women over 40") in terms
+        assert ClientProfileVersion.objects.get(number=live_profile.number).is_current
+
+
+def test_a_csv_without_a_name_column_is_refused_and_drafts_nothing(client, admin, jarrow):
+    client.force_login(admin)
+
+    response = client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]),
+        {"file": _upload("wrong.csv", "sku,price\nJF-1,10\n")},
+        follow=True,
+    )
+
+    assert "needs a &#x27;name&#x27; column" in response.content.decode()
+    with scoped(jarrow):
+        assert not ClientProfileVersion.objects.exists()
+
+
+def test_an_exported_profile_imports_back_as_the_same_profile(client, admin, jarrow, live_profile):
+    """The round trip: export, send to the client, correct, import."""
+    client.force_login(admin)
+
+    exported = client.get(
+        reverse("ops-client-profile-export", args=[jarrow.slug, live_profile.number])
+    )
+    assert exported["Content-Disposition"].endswith('profile-v1.json"')
+
+    client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]),
+        {"file": _upload("jarrow-profile-v1.json", exported.content.decode())},
+    )
+
+    with scoped(jarrow):
+        reimported = ClientProfileVersion.objects.get(number=2)
+        assert services.to_spec(reimported)["assets"] == services.to_spec(live_profile)["assets"]
+
+
+def test_a_json_file_that_is_not_a_profile_is_refused(client, admin, jarrow):
+    client.force_login(admin)
+
+    response = client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]),
+        {"file": _upload("profile.json", "[1, 2, 3]")},
+        follow=True,
+    )
+
+    assert "one JSON object" in response.content.decode()
+    with scoped(jarrow):
+        assert not ClientProfileVersion.objects.exists()
+
+
+def test_a_plain_operator_cannot_import_a_profile(client, plain_operator, jarrow):
+    client.force_login(plain_operator)
+
+    response = client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]),
+        {"file": _upload("jarrow-products.csv", PRODUCT_LIST)},
+    )
+
+    assert response.status_code == 403

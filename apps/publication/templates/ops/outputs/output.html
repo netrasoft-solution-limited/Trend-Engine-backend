@@ -2,7 +2,7 @@
 {% block title %}{{ output.title }}{% endblock %}
 
 {% block content %}
-  <h1>{{ output.title }}</h1>
+  <h1>{{ output.title }}{% if output.is_illustrative %} <span class="pill illustrative">illustrative</span>{% endif %}</h1>
   <p class="lede">
     <a href="{% url 'ops-outputs' %}">← Outputs</a> ·
     {{ output.get_type_display }} for {{ organization.name }}
