@@ -65,6 +65,17 @@ def client_facing(text: str) -> str:
     return re.sub(r"\s+([.,;:])", r"\1", re.sub(r"[ \t]{2,}", " ", cleaned)).strip()
 
 
+#: How each maturity reads to a client. Only a measured, rising development is
+#: called a trend (Mark, 19 Oct); the others say what they are.
+STATUS = {
+    Signal.Maturity.MEASURED_TREND: "Measured rising trend: discussion is measurably above "
+    "its baseline.",
+    Signal.Maturity.RECURRING: "Recurring discussion: raised in more than one week, not yet "
+    "measured as a rising trend.",
+    Signal.Maturity.WATCH: "Watch item: not yet enough evidence over time to call it a trend.",
+}
+
+
 @dataclass
 class Development:
     signal: Signal
@@ -150,7 +161,8 @@ def sections_for_brief(organization, codes: list[str] | None = None) -> Brief:
 
 def _in_brief(developments: list[Development]) -> dict:
     lines = [
-        f"· {d.signal.title}: {_first_sentence(client_facing(d.recommendation.why_it_matters))}"
+        f"· {d.signal.title} ({d.signal.get_maturity_display().lower()}): "
+        f"{_first_sentence(client_facing(d.recommendation.why_it_matters))}"
         for d in developments
     ]
     return {"heading": "In brief", "text": "\n".join(lines)}
@@ -160,7 +172,10 @@ def _development(organization, development: Development, sources) -> dict:
     signal, rec = development.signal, development.recommendation
     supporting, dissent = _evidence(signal, sources)
 
-    parts = [f"What changed. {signal.statement}"]
+    parts = [
+        f"Status. {STATUS.get(signal.maturity, STATUS[Signal.Maturity.WATCH])}",
+        f"What changed. {signal.statement}",
+    ]
     parts.append(f"Why it matters to {organization.name}. {client_facing(rec.why_it_matters)}")
     if rec.products:
         parts.append(f"Products concerned: {', '.join(rec.products)}.")

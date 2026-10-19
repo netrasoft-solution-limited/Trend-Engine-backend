@@ -141,6 +141,20 @@ class RecoveryCode(models.Model):
         return f"recovery code for {self.operator_id} ({'used' if self.used_at else 'unused'})"
 
 
+class ImmutableRecord(RuntimeError):
+    """An audit row cannot be changed or removed once written."""
+
+
+class AuditEventQuerySet(models.QuerySet):
+    """Bulk changes refused too: `.update()` and `.delete()` bypass `save()`."""
+
+    def update(self, **kwargs):
+        raise ImmutableRecord("Audit events cannot be updated.")
+
+    def delete(self):
+        raise ImmutableRecord("Audit events cannot be deleted.")
+
+
 class AuditEvent(models.Model):
     """Immutable record of config, review, approval, publication and export
     events (PRD §7.1).
@@ -190,12 +204,25 @@ class AuditEvent(models.Model):
     message = models.TextField()
     context = models.JSONField(default=dict, blank=True)
 
+    objects = AuditEventQuerySet.as_manager()
+
     class Meta:
         ordering = ("-at",)
         indexes = [models.Index(fields=["organization", "-at"])]
 
     def __str__(self) -> str:
         return f"{self.at:%Y-%m-%d %H:%M} {self.kind} {self.actor_label}"
+
+    # "Immutable" was a docstring until 20 Oct; now it is enforced. A record
+    # that can be edited is a record that can be made to say anything, and the
+    # 1 October correction depends on the original rows standing as written.
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableRecord("Audit events are written once and never changed.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ImmutableRecord("Audit events cannot be deleted.")
 
 
 class CostEvent(models.Model):

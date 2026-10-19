@@ -34,7 +34,15 @@ from django.utils import timezone
 
 from apps.operations.models import AuditEvent
 
-from .models import Approval, ExpertReview, Output, OutputState, OutputVersion
+from .models import (
+    Approval,
+    ExpertReview,
+    ExpertReviewer,
+    Output,
+    OutputState,
+    OutputVersion,
+    RecordNote,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +60,26 @@ def _audit(*, kind: str, actor_label: str, organization, message: str, context: 
         message=message,
         context=context,
     )
+
+
+def _check_profile_citation(organization, citation: str) -> None:
+    """PRD §8: an output names the profile version it was built from — a stored
+    one. The 1 October brief carried "jarrow@2026-10-01", a label that matched
+    no profile because none existed."""
+    if not citation:
+        return
+    from apps.clients.models import ClientProfileVersion
+
+    stored = {
+        v.citation for v in ClientProfileVersion.objects.filter(organization=organization)
+    }
+    named = [part.strip() for part in citation.split(",") if part.strip()]
+    missing = [n for n in named if n not in stored]
+    if missing:
+        raise DraftingError(
+            f"{organization} has no stored client profile {', '.join(missing)}. An output "
+            f"must cite a profile version that exists."
+        )
 
 
 @transaction.atomic
@@ -81,6 +109,7 @@ def draft(
     """
     if not sections:
         raise DraftingError("An output with no sections is not a draft, it is an empty row.")
+    _check_profile_citation(organization, client_profile_version)
 
     output, created = Output.objects.get_or_create(
         organization=organization,
@@ -165,7 +194,12 @@ def approve(version: OutputVersion, *, actor_label: str, stage: str = "operator"
 
 @transaction.atomic
 def record_expert_signoff(
-    output: Output, *, reviewer_label: str, discipline: str = "", note: str = ""
+    output: Output,
+    *,
+    reviewer_label: str,
+    actor_label: str,
+    discipline: str = "",
+    note: str = "",
 ) -> ExpertReview:
     """The recorded sign-off Arch §9.2 requires BEFORE publication.
 
@@ -173,16 +207,34 @@ def record_expert_signoff(
     judgement, while publication puts a health or scientific claim in front of
     a client. `publication.publish()` refuses without this for every type in
     `EXPERT_REVIEW_REQUIRED`.
+
+    Since 20 Oct the reviewer must be on the `ExpertReviewer` register and may
+    not be the operator recording it. A typed name with nobody behind it is how
+    the 1 October brief got a sign-off no review supports.
     """
-    if not reviewer_label.strip():
+    name = reviewer_label.strip()
+    if not name:
         raise DraftingError(
             "An expert sign-off needs a named reviewer. An anonymous one is not a record."
+        )
+    reviewer = ExpertReviewer.objects.filter(name__iexact=name, is_active=True).first()
+    if reviewer is None:
+        raise DraftingError(
+            f"{name!r} is not a registered expert reviewer. Register them first "
+            f"(manage.py expert_reviewer add) with their qualification, so the "
+            f"sign-off names someone who can be asked about it."
+        )
+    actor = (actor_label or "").strip().lower()
+    if actor and actor in (reviewer.email.lower(), reviewer.name.lower()):
+        raise DraftingError(
+            "The person recording a sign-off cannot be the reviewer. Expert review is "
+            "a second pair of eyes, or it is not review."
         )
 
     review = ExpertReview.objects.create(
         organization=output.organization,
         output=output,
-        reviewer_label=reviewer_label,
+        reviewer_label=f"{reviewer.name}, {reviewer.qualification}",
         discipline=discipline or "Scientific / legal claims",
         note=note,
         signed_off_at=timezone.now(),
@@ -190,9 +242,35 @@ def record_expert_signoff(
 
     _audit(
         kind=AuditEvent.Kind.REVIEW,
-        actor_label=reviewer_label,
+        actor_label=actor_label or reviewer.email,
         organization=output.organization,
-        message=f"Expert sign-off recorded for {output.title}",
-        context={"output_id": output.pk, "discipline": review.discipline},
+        message=f"Expert sign-off by {reviewer.name} recorded for {output.title}",
+        context={
+            "output_id": output.pk,
+            "discipline": review.discipline,
+            "reviewer": reviewer.name,
+            "reviewer_email": reviewer.email,
+        },
     )
     return review
+
+
+@transaction.atomic
+def add_record_note(output: Output, *, text: str, author_label: str) -> RecordNote:
+    """A correction that travels with the record and never rewrites it."""
+    if not text.strip():
+        raise DraftingError("A record note needs text.")
+    if not author_label.strip():
+        raise DraftingError("A record note needs an author.")
+    note = RecordNote.objects.create(
+        organization=output.organization, output=output, text=text.strip(),
+        author_label=author_label.strip(),
+    )
+    _audit(
+        kind=AuditEvent.Kind.REVIEW,
+        actor_label=author_label,
+        organization=output.organization,
+        message=f"Record note added to {output.title}",
+        context={"output_id": output.pk, "record_note_id": note.pk},
+    )
+    return note

@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 
+from django.conf import settings
 from django.contrib import messages
 from django.db.models import F, OuterRef, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
@@ -224,6 +225,11 @@ class SignalReviewView(View):
 
         weekly = list(reversed((signal.baseline or {}).get("weekly_items") or []))
         peak = max(weekly, default=0) or 1
+        # Collection behind each week, oldest first like the bars, so the
+        # operator can see whether a quiet week was the category or the feed.
+        coverage = list(reversed((signal.baseline or {}).get("coverage") or []))
+        for n, week in zip(weekly, coverage, strict=False):
+            week["supporting"] = n
 
         return render(
             request,
@@ -234,6 +240,11 @@ class SignalReviewView(View):
                 "components": _components(signal.components, DOMAIN_WEIGHTS),
                 "available": signal.components_available,
                 "weekly": [{"n": n, "pct": round(100 * n / peak)} for n in weekly],
+                "coverage": coverage,
+                "covered_week": {
+                    "items": settings.SIGNAL_COVERED_WEEK_MIN_ITEMS,
+                    "sources": settings.SIGNAL_COVERED_WEEK_MIN_SOURCES,
+                },
                 "supporting": [r for r in evidence if r.role == SignalEvidence.Role.SUPPORTS],
                 "contradicting": [
                     r for r in evidence if r.role == SignalEvidence.Role.CONTRADICTS
@@ -335,6 +346,7 @@ def _components(stored: dict, weights: dict) -> list[dict]:
                 "key": key,
                 "label": COMPONENT_LABELS.get(key, key),
                 "weight": component.get("weight", weight),
+                "effective_weight": component.get("effective_weight"),
                 "value": component.get("value"),
                 "detail": component.get("detail", "Not computed."),
             }

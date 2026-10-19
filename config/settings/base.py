@@ -356,3 +356,11 @@ LOGGING = {
         "apps.tenancy": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
+
+
+# A week of collection counts towards a momentum baseline only when it holds at
+# least this many relevant, transcribed items from at least this many sources
+# (apps.intelligence.detection.weekly_coverage). Thin weeks measure the
+# collection rather than the category.
+SIGNAL_COVERED_WEEK_MIN_ITEMS = int(env("SIGNAL_COVERED_WEEK_MIN_ITEMS", "10"))
+SIGNAL_COVERED_WEEK_MIN_SOURCES = int(env("SIGNAL_COVERED_WEEK_MIN_SOURCES", "3"))

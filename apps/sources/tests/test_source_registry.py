@@ -90,6 +90,8 @@ def test_either_one_is_enough():
 def test_youtube_needs_queries_or_urls():
     assert registry.config_problem(Source.Route.YOUTUBE, {}) != ""
     assert registry.config_problem(Source.Route.YOUTUBE, {"queries": ["magnesium"]}) == ""
+    channels = {"channels": ["https://www.youtube.com/@hubermanlab"]}
+    assert registry.config_problem(Source.Route.YOUTUBE, channels) == ""
 
 
 def test_the_social_route_explains_that_it_is_gated_not_merely_unbuilt():

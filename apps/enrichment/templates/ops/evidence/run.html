@@ -36,6 +36,8 @@
             <tr>
               <td>
                 <a href="{% url 'ops-item' item.pk %}">{{ item.title|truncatechars:90 }}</a>
+                {% if item.duplicate_status == "confirmed" %}<span class="pill illustrative">same conversation as #{{ item.duplicate_of_id }}</span>
+                {% elif item.duplicate_status == "suspected" %}<span class="pill">possible duplicate</span>{% endif %}
                 <div class="note" style="margin-top:2px">
                   {{ item.creator|default:"unattributed" }}{% if item.published_at %} · {{ item.published_at|date:"j M Y" }}{% endif %}
                 </div>

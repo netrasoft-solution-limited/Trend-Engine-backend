@@ -205,3 +205,59 @@ class ExportArtifact(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.get_format_display()})"
+
+
+class ExpertReviewer(models.Model):
+    """Who may record an expert sign-off (PRD §6.6, Arch §9.2).
+
+    Global, not per tenant: the reviewer is Pure Play's expert, engaged across
+    clients. Until 20 Oct a sign-off accepted any typed name, which is how the
+    1 October brief came to carry "Dr M. Alvarez, nutrition science" — the
+    placeholder our own tests use — with no review behind it. A sign-off now
+    has to name someone on this list, and that someone cannot be the operator
+    recording it.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    qualification = models.CharField(
+        max_length=200, help_text="e.g. Registered dietitian; PhD nutrition science."
+    )
+    email = models.EmailField(unique=True)
+    is_active = models.BooleanField(default=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+    added_by_label = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return f"{self.name}, {self.qualification}"
+
+
+class RecordNote(TenantScopedModel):
+    """A correction or clarification attached to an output, after the fact.
+
+    Append-only, and never part of an export: the artifact a client received
+    (or, on 1 October, did not) stays exactly as it was, and the note travels
+    with the record in the operator app instead. Rewriting history to fix it is
+    the thing this exists to avoid.
+    """
+
+    output = models.ForeignKey(Output, on_delete=models.CASCADE, related_name="record_notes")
+    text = models.TextField()
+    author_label = models.CharField(max_length=200)
+    at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("output", "at")
+
+    def __str__(self) -> str:
+        return f"Note on output {self.output_id} by {self.author_label}"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("Record notes are written once; add another note to correct one.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Record notes cannot be deleted.")

@@ -219,7 +219,9 @@ class ItemDetailView(View):
     """One collected item: where it came from, what was decided, what it said."""
 
     def get(self, request, pk: int):
-        item = get_object_or_404(_items().select_related("run", "policy"), pk=pk)
+        item = get_object_or_404(
+            _items().select_related("run", "policy", "duplicate_of__source"), pk=pk
+        )
         transcript = item.transcript if _has_transcript(item) else None
         claims = list(
             Claim.objects.filter(content_item=item)

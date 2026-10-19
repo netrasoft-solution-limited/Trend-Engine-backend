@@ -204,3 +204,24 @@ def test_one_clients_recommendation_never_shows_on_anothers_page(
 
     assert response.context["recommendation"] is None
     assert proposed.why_it_matters not in response.content.decode()
+
+
+def test_the_page_shows_effective_weights_maturity_and_coverage(client, operator, jarrow, ranked):
+    from django.utils import timezone
+
+    from apps.intelligence import detection
+
+    signal = Signal.objects.get(code="SIG-3001")
+    detection.rescore(signal, now=timezone.now())
+    client.force_login(operator)
+
+    response = page(client, jarrow)
+    body = response.content.decode()
+
+    by_key = {c["key"]: c for c in response.context["components"]}
+    assert by_key["momentum"]["effective_weight"] is None
+    assert by_key["source_diversity"]["effective_weight"] > 15
+    assert "of the plan&#x27;s weighting" in body or "of the plan's weighting" in body
+    assert signal.get_maturity_display() in body
+    assert "Counts towards a baseline" in body
+    assert len(response.context["coverage"]) == 6

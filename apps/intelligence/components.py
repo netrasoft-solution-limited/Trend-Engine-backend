@@ -12,7 +12,8 @@ Three rules shape every function in this module:
    the week it was published, however much it said.
 
 2. A MISSING INPUT IS MISSING, NOT ZERO. Momentum needs a baseline the corpus
-   may not have yet; engagement needs view counts that are not collected yet.
+   may not have yet — measured in adequately covered weeks, not days;
+   engagement needs view counts that are not collected yet.
    Such a component gets `value=None` and a reason, and the domain score is the
    weighted mean of the components that DO have values. Scoring a missing input
    as 0 would quietly rank every new development as "not moving", and scoring
@@ -47,10 +48,20 @@ WEIGHTS: dict[str, int] = {
 }
 
 #: Momentum compares this week with a 28-day baseline before it, so it needs
-#: five weeks of watching before it means anything.
-MOMENTUM_NEEDS_DAYS = 35
-#: Acceleration compares two week-on-week changes: three weeks.
-ACCELERATION_NEEDS_DAYS = 21
+#: five consecutive ADEQUATELY COVERED weeks — not five weeks of calendar. A
+#: baseline built from weeks in which little was collected measures the
+#: collection, not the category (Mark, 19 Oct). What counts as covered is
+#: decided where the collection is visible: `detection.weekly_coverage`.
+MOMENTUM_NEEDS_WEEKS = 5
+#: Acceleration compares two week-on-week changes: three covered weeks.
+ACCELERATION_NEEDS_WEEKS = 3
+#: Momentum at or above this, measured, is a rising trend.
+RISING = 60
+
+#: What a development can honestly be called, given what has been measured.
+MEASURED_TREND = "measured_trend"
+RECURRING = "recurring"
+WATCH = "watch"
 #: Recency is full within this many days of the newest evidence, zero at the
 #: end of the signal window.
 FRESH_DAYS = 2
@@ -75,6 +86,7 @@ class Scored:
     baseline: dict
     confidence: int
     confidence_reasons: list[str] = field(default_factory=list)
+    maturity: str = WATCH
     item_count: int = 0
     creator_count: int = 0
     source_count: int = 0
@@ -87,15 +99,21 @@ def score(
     now: datetime,
     watching_since: datetime | None,
     first_seen_at: datetime,
+    coverage: list[dict] | None = None,
 ) -> Scored:
+    """`coverage` is the whole collection's weekly coverage, newest week first:
+    `[{"relevant_transcribed", "sources", "covered"}, ...]`. Without it nothing
+    is treated as covered, so momentum and acceleration stay unmeasured."""
     supporting = list(supporting)
     contradicting = list(contradicting)
     watched_days = (now - watching_since).days if watching_since else 0
     weekly = _weekly_items(supporting, now=now, weeks=6)
+    coverage = list(coverage or [])
+    streak = _covered_streak(coverage)
 
     components = {
-        "momentum": _momentum(weekly, watched_days),
-        "acceleration": _acceleration(weekly, watched_days),
+        "momentum": _momentum(weekly, streak),
+        "acceleration": _acceleration(weekly, streak),
         "source_diversity": _diversity(supporting),
         "evidence_quality": _quality(supporting),
         "engagement": _component(
@@ -109,6 +127,14 @@ def score(
 
     available = {n: c for n, c in components.items() if c["value"] is not None}
     total_weight = sum(c["weight"] for c in available.values())
+    # The weight each component actually carries once missing ones are left
+    # out — what the score really rests on, shown beside the plan's weight.
+    for component in components.values():
+        component["effective_weight"] = (
+            round(100 * component["weight"] / total_weight, 1)
+            if component["value"] is not None and total_weight
+            else None
+        )
     domain_score = (
         round(sum(c["value"] * c["weight"] for c in available.values()) / total_weight)
         if total_weight
@@ -124,9 +150,13 @@ def score(
             "weeks_label": "newest first; each entry is one 7-day week ending now",
             "watching_since": watching_since.date().isoformat() if watching_since else None,
             "watched_days": watched_days,
+            "coverage": coverage,
+            "covered_streak": streak,
+            "weighting_share": total_weight,
         },
         confidence=confidence,
         confidence_reasons=reasons,
+        maturity=_maturity(components["momentum"]["value"], weekly),
         item_count=len({f.item_id for f in supporting}),
         creator_count=len({f.creator for f in supporting if f.creator}),
         source_count=len({f.route for f in supporting if f.route}),
@@ -151,12 +181,31 @@ def _weekly_items(facts: list[Fact], *, now: datetime, weeks: int) -> list[int]:
     return [len(b) for b in buckets]
 
 
-def _momentum(weekly: list[int], watched_days: int) -> dict:
-    if watched_days < MOMENTUM_NEEDS_DAYS:
+def _covered_streak(coverage: list[dict]) -> int:
+    streak = 0
+    for week in coverage:
+        if not week.get("covered"):
+            break
+        streak += 1
+    return streak
+
+
+def _maturity(momentum: float | None, weekly: list[int]) -> str:
+    """Measured rising trend only when momentum was measured and is rising.
+    Otherwise: recurring if the evidence spans two or more weeks, else watch."""
+    if momentum is not None and momentum >= RISING:
+        return MEASURED_TREND
+    if sum(1 for n in weekly if n) >= 2:
+        return RECURRING
+    return WATCH
+
+
+def _momentum(weekly: list[int], streak: int) -> dict:
+    if streak < MOMENTUM_NEEDS_WEEKS:
         return _component(
             None,
-            f"Needs {MOMENTUM_NEEDS_DAYS} days of collection for a 28-day baseline; "
-            f"the corpus has {watched_days}.",
+            f"Needs {MOMENTUM_NEEDS_WEEKS} consecutive adequately covered weeks for a "
+            f"28-day baseline; {streak} so far.",
         )
     current, baseline = weekly[0], sum(weekly[1:5]) / 4
     # log2 of the ratio: level is 50, double the baseline is 75, four times is
@@ -169,12 +218,12 @@ def _momentum(weekly: list[int], watched_days: int) -> dict:
     )
 
 
-def _acceleration(weekly: list[int], watched_days: int) -> dict:
-    if watched_days < ACCELERATION_NEEDS_DAYS:
+def _acceleration(weekly: list[int], streak: int) -> dict:
+    if streak < ACCELERATION_NEEDS_WEEKS:
         return _component(
             None,
-            f"Needs {ACCELERATION_NEEDS_DAYS} days of collection to compare two "
-            f"week-on-week changes; the corpus has {watched_days}.",
+            f"Needs {ACCELERATION_NEEDS_WEEKS} consecutive adequately covered weeks to "
+            f"compare two week-on-week changes; {streak} so far.",
         )
     latest, previous = weekly[0] - weekly[1], weekly[1] - weekly[2]
     return _component(

@@ -101,6 +101,27 @@ class ContentItem(models.Model):
     #: Which fallback rung produced the content — Arch §7.2 requires the route
     #: to be attributable per item, for provenance and for cost.
     acquisition_route = models.CharField(max_length=64, blank=True)
+    # ── Same conversation, published twice (PRD §6.3) ──────────────────────
+    #: A podcast episode, its YouTube upload and clips cut from either are one
+    #: conversation, and must not count as independent confirmation. Set by
+    #: `services.duplicates`. CONFIRMED (transcript overlap) changes counting:
+    #: the item adds no item, creator or source type to any score and is not
+    #: extracted. SUSPECTED (metadata only) is recorded and shown, never acted on.
+    duplicate_of = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="duplicates"
+    )
+    duplicate_status = models.CharField(
+        max_length=12,
+        choices=[("", "Not a duplicate"), ("confirmed", "Same conversation"),
+                 ("suspected", "Suspected same conversation")],
+        blank=True,
+        default="",
+    )
+    #: Share of the shorter transcript found in the longer one (0–1), or the
+    #: title similarity for a suspected match.
+    duplicate_overlap = models.FloatField(null=True, blank=True)
+    duplicate_reason = models.CharField(max_length=300, blank=True)
+
     #: Every walk of the transcript fallback ladder, oldest first: when, each
     #: step's outcome in its own words, and what it produced. PRD §14 asks that
     #: every item show its transcript source, method, status and cost; the
@@ -137,6 +158,24 @@ class ContentItem(models.Model):
         """Arch §7.1: metadata-only items must be surfaced honestly as such,
         never presented as fully understood content. Extraction skips them."""
         return self.content_state != self.ContentState.TRANSCRIBED
+
+    @property
+    def canonical(self) -> ContentItem:
+        """The item this conversation counts as. Itself unless it is a
+        confirmed duplicate; chains are followed to their root."""
+        item, seen = self, set()
+        while (
+            item.duplicate_status == "confirmed"
+            and item.duplicate_of_id
+            and item.pk not in seen
+        ):
+            seen.add(item.pk)
+            item = item.duplicate_of
+        return item
+
+    @property
+    def is_duplicate(self) -> bool:
+        return self.duplicate_status == "confirmed" and self.duplicate_of_id is not None
 
     def link_at(self, seconds: float | None) -> str:
         """The source URL, opened at a moment where the platform supports it.

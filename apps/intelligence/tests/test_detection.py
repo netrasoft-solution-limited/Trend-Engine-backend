@@ -265,3 +265,92 @@ def test_a_missing_creator_counts_as_its_show_not_as_nobody(corpus):
     detection.detect(client=llm)
 
     assert Signal.objects.get().creator_count == 2, "two different shows, two voices"
+
+
+# ── One conversation, published twice (Mark, 19 Oct) ────────────────────────
+
+
+def _same_conversation(duplicate: Claim, original: Claim) -> None:
+    ContentItem.objects.filter(pk=duplicate.content_item_id).update(
+        duplicate_of=original.content_item_id, duplicate_status="confirmed"
+    )
+
+
+def test_a_podcast_and_its_upload_cannot_make_a_development_alone(corpus):
+    """The YouTube copy is not a second voice."""
+    _same_conversation(corpus["threonate"], corpus["glycinate"])
+    llm, _ = detecting(
+        magnesium(corpus, supporting_claim_ids=[corpus["glycinate"].pk, corpus["threonate"].pk],
+                  contradicting_claim_ids=[])
+    )
+
+    result = detection.detect(client=llm)
+
+    assert result.dropped_single_source == 1
+    assert not Signal.objects.exists()
+
+
+def test_a_reupload_adds_no_item_creator_or_source_type(corpus):
+    llm, _ = detecting(magnesium(corpus, contradicting_claim_ids=[]))
+    detection.detect(client=llm)
+    signal = Signal.objects.get()
+    before = (signal.item_count, signal.creator_count, signal.source_count)
+    assert before == (2, 2, 2)
+
+    _same_conversation(corpus["threonate"], corpus["glycinate"])
+    detection.rescore(signal, now=timezone.now())
+
+    assert (signal.item_count, signal.creator_count, signal.source_count) == (1, 1, 1)
+    assert "A single item is not cross-source evidence." in signal.confidence_reasons
+
+
+def test_the_prompt_shows_the_conversation_not_the_copy(corpus):
+    _same_conversation(corpus["threonate"], corpus["glycinate"])
+    llm, transport = detecting()
+
+    detection.detect(client=llm)
+
+    sent = transport.calls[0]["messages"][0]["content"]
+    original = corpus["glycinate"].content_item_id
+    assert f"C{corpus['threonate'].pk} | I{original} |" in sent
+
+
+def test_a_development_proposed_again_extends_the_open_one(corpus):
+    """SIG-3006 and SIG-3007 on production were one development, created twice."""
+    llm, _ = detecting(magnesium(corpus))
+    detection.detect(client=llm)
+    code = Signal.objects.get().code
+
+    llm, _ = detecting(magnesium(corpus, title="Same thing, new name"))
+    result = detection.detect(client=llm)
+
+    assert result.created == []
+    assert result.reused == [code]
+    assert Signal.objects.count() == 1
+
+
+def test_weekly_coverage_applies_both_thresholds_and_skips_duplicates(db, settings):
+    settings.SIGNAL_COVERED_WEEK_MIN_ITEMS = 3
+    settings.SIGNAL_COVERED_WEEK_MIN_SOURCES = 2
+    now = timezone.now()
+    one = Source.objects.create(name="One", route=Source.Route.PODCAST)
+    two = Source.objects.create(name="Two", route=Source.Route.YOUTUBE)
+
+    def collected(source, key, days_ago, **extra):
+        return ContentItem.objects.create(
+            source=source, external_id=key, title=key, content_hash=key,
+            content_state=ContentItem.ContentState.TRANSCRIBED,
+            gate_decision=ContentItem.GateDecision.RELEVANT,
+            published_at=now - timedelta(days=days_ago), **extra,
+        )
+
+    first = collected(one, "a", 1)
+    collected(one, "b", 2)
+    collected(two, "c", 3)
+    collected(two, "dupe", 3, duplicate_of=first, duplicate_status="confirmed")
+    collected(one, "d", 9)  # last week: one source only
+
+    rows = detection.weekly_coverage(now)
+
+    assert (rows[0]["relevant_transcribed"], rows[0]["sources"], rows[0]["covered"]) == (3, 2, True)
+    assert (rows[1]["relevant_transcribed"], rows[1]["covered"]) == (1, False)

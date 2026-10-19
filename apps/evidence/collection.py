@@ -71,17 +71,20 @@ def _youtube(source: Source, limit: int) -> list[dict]:
 
     config = source.config or {}
     queries = [q for q in (config.get("queries") or []) if q]
+    channels = [c for c in (config.get("channels") or []) if c]
     urls = [u for u in (config.get("urls") or []) if u]
 
-    if not queries and not urls:
+    if not queries and not channels and not urls:
         raise NotCollectable(
-            f"{source.name} has no queries or urls in its config. "
-            f"The YouTube connector needs something to search for or fetch."
+            f"{source.name} has no queries, channels or urls in its config. "
+            f"The YouTube connector needs something to search for, follow or fetch."
         )
 
     connector = apify_for(source)
     if urls:
         return connector.fetch_by_url(urls[:limit])
+    if channels:
+        return connector.fetch_channels(channels, max_results=limit)
     return connector.search(queries, max_results=limit)
 
 

@@ -170,6 +170,19 @@ class ApifyActorConnector(BaseConnector):
         }
         return [self._normalise(row) for row in self._run(payload, timeout=timeout)]
 
+    def fetch_channels(
+        self, channels: list[str], *, max_results: int = 3, timeout: float = 280.0
+    ) -> list[dict]:
+        """Each channel's latest videos. The Actor accepts channel pages as
+        start URLs; `maxResults` applies per channel, so the spend ceiling is
+        channels × max_results videos."""
+        payload = {
+            **self.config.input_template,
+            "startUrls": [{"url": c.rstrip("/") + "/videos"} for c in channels],
+            "maxResults": max_results,
+        }
+        return [self._normalise(row) for row in self._run(payload, timeout=timeout)]
+
     def fetch_metadata(self, refs: list[ItemRef]) -> Iterable[dict]:
         return self.fetch_by_url([r.url for r in refs if r.url])
 

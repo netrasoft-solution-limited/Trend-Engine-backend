@@ -204,3 +204,35 @@ def test_the_funnel_reports_the_shape_of_the_filter(source):
     assert stats["rejected"] == 4  # rejected + sampled
     assert stats["sampled"] == 1
     assert stats["pass_rate"] == pytest.approx(2 / 6, abs=0.01)
+
+
+# ── Language (the Japanese-language video in two creatine signals, 18–19 Oct) ─
+
+
+def test_an_item_in_another_script_is_set_aside_without_a_model_call(source):
+    item = make_item(source, title="【2026年最新研究】たった3gで筋肉が変わる 筋肥大率1.3倍")
+    llm, transport = client_returning(relevant=True)
+
+    result = gate.assess(item, domain_pack="supplements", client=llm)
+
+    assert result.decision == ContentItem.GateDecision.REJECTED
+    assert "Not in English" in result.reason
+    assert transport.calls == [], "nothing is spent on it"
+
+
+def test_an_english_title_with_a_brand_symbol_still_goes_to_the_model(source):
+    item = make_item(source, title="MagMind® review: magnesium L-threonate and sleep")
+    llm, transport = client_returning(relevant=True)
+
+    gate.assess(item, domain_pack="supplements", client=llm)
+
+    assert len(transport.calls) == 1
+
+
+def test_a_source_set_to_another_language_is_not_filtered(db):
+    source = Source.objects.create(
+        name="JP channel", route=Source.Route.YOUTUBE, config={"language": "ja"}
+    )
+    item = make_item(source, title="たった3gで筋肉が変わる 筋肥大率1.3倍、筋力増強率1.5倍")
+
+    assert gate.language_mismatch(item) == ""

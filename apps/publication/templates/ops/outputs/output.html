@@ -27,6 +27,18 @@
     </p>
   </div>
 
+  {% if record_notes %}
+    <div class="card" style="border-color:var(--warn)">
+      <span class="name">Record notes</span>
+      <p class="note">Added after the fact. They correct or clarify this record; the original
+        output, its versions and any exported file are unchanged.</p>
+      {% for n in record_notes %}
+        <p style="margin:8px 0 0">{{ n.text|linebreaksbr }}</p>
+        <p class="note">— {{ n.author_label }}, {{ n.at|date:"j M Y, H:i" }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% if output.requires_expert_review %}
     <div class="card">
       <div class="row">
@@ -48,8 +60,17 @@
       {% if not signed_off %}
         <form method="post" action="{% url 'ops-output-signoff' output.pk %}">
           {% csrf_token %}
-          <label for="reviewer">Reviewer's name</label>
-          <input type="text" id="reviewer" name="reviewer" required>
+          {% if reviewers %}
+            <label for="reviewer">Registered reviewer</label>
+            <select id="reviewer" name="reviewer" required>
+              {% for r in reviewers %}<option value="{{ r.name }}">{{ r.name }} — {{ r.qualification }}</option>{% endfor %}
+            </select>
+          {% else %}
+            <p class="note state unreadable">
+              No expert reviewer is registered, so this cannot be signed off yet. A sign-off
+              must name a registered reviewer, and not the operator recording it.
+            </p>
+          {% endif %}
           <label for="discipline">Discipline</label>
           <input type="text" id="discipline" name="discipline" placeholder="Scientific / legal claims">
           <label for="note">Note</label>

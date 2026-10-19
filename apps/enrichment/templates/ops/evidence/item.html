@@ -33,6 +33,27 @@ what it cost, and every claim with the moment it was said.
       Access basis: {% if item.policy %}{{ item.policy }}{% else %}<span class="state unreadable">none recorded</span>{% endif %}
       · collected {{ item.discovered_at|date:"j M Y, H:i" }}
     </p>
+    {% if item.duplicate_status == "confirmed" and item.duplicate_of %}
+      <p class="note state env">
+        <b>Same conversation as</b>
+        <a href="{% url 'ops-item' item.duplicate_of.pk %}">{{ item.duplicate_of.title|truncatechars:80 }}</a>
+        ({{ item.duplicate_of.source.name }}) — {{ item.duplicate_reason }}.
+        It is not extracted, and adds no item, creator or source type to any score.
+      </p>
+    {% elif item.duplicate_status == "suspected" and item.duplicate_of %}
+      <p class="note">
+        <b>Possibly the same conversation as</b>
+        <a href="{% url 'ops-item' item.duplicate_of.pk %}">{{ item.duplicate_of.title|truncatechars:80 }}</a>
+        — {{ item.duplicate_reason }}. Recorded only; it changes no score.
+      </p>
+    {% endif %}
+    {% if item.duplicates.exists %}
+      <p class="note">
+        Also published as:
+        {% for d in item.duplicates.all %}{% if d.duplicate_status == "confirmed" %}<a href="{% url 'ops-item' d.pk %}">{{ d.source.name }}</a>{% if not forloop.last %}, {% endif %}{% endif %}{% endfor %}
+        — counted once, here.
+      </p>
+    {% endif %}
   </div>
 
   <div class="card">

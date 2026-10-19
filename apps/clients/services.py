@@ -241,7 +241,8 @@ def spec_from_csv(text: str) -> dict:
     """A product list exported from a spreadsheet, as a spec of assets.
 
     The columns are found by header, case-insensitively: `name` is required;
-    `kind`, `terms` and `weight` are optional. Terms are separated by `;` or
+    `kind`, `terms`, `weight`, `url` and `notes` are optional (`url` and
+    `notes` are kept together in the entry's notes). Terms are separated by `;` or
     `|`, because a comma is the column separator. A row whose `kind` is
     audience, priority or competitor lands on that facet instead, so one sheet
     can carry a whole profile if the operator wants it to.
@@ -273,10 +274,12 @@ def spec_from_csv(text: str) -> dict:
         name = cell(row, "name")
         if not name:
             continue
+        notes = " · ".join(part for part in (cell(row, "url"), cell(row, "notes")) if part)
         entry = {
             "name": name,
             "terms": [t.strip() for t in re.split(r"[;|]", cell(row, "terms")) if t.strip()],
             "weight": cell(row, "weight") or 50,
+            **({"notes": notes} if notes else {}),
         }
         kind = cell(row, "kind").lower()
         if kind in facet_kinds:

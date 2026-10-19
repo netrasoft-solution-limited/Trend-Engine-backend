@@ -123,7 +123,7 @@ def test_a_youtube_source_without_queries_or_urls_says_so(policy):
         name="Empty channel", route=Source.Route.YOUTUBE, policy=policy, config={}
     )
 
-    with pytest.raises(NotCollectable, match="queries or urls"):
+    with pytest.raises(NotCollectable, match="queries, channels or urls"):
         collect(source)
 
 
@@ -201,3 +201,23 @@ def test_every_route_has_an_entry_so_none_falls_through_silently():
     not vanish into a KeyError or an empty list."""
     for route, _ in Source.Route.choices:
         assert route in collection.COLLECTORS, f"no COLLECTORS entry for {route!r}"
+
+
+
+def test_a_youtube_source_can_follow_channels(policy, monkeypatch):
+    """Channels, not only searches: the proposed watchlist follows creators."""
+    source = Source.objects.create(
+        name="Huberman on YouTube", route=Source.Route.YOUTUBE, policy=policy,
+        config={"channels": ["https://www.youtube.com/@hubermanlab"], "limit": 3},
+    )
+    seen = {}
+
+    class FakeConnector:
+        def fetch_channels(self, channels, *, max_results=3):
+            seen.update(channels=channels, max_results=max_results)
+            return [{"external_id": "vid-1"}]
+
+    monkeypatch.setattr("apps.connectors.factory.apify_for", lambda source: FakeConnector())
+
+    assert collect(source) == [{"external_id": "vid-1"}]
+    assert seen == {"channels": ["https://www.youtube.com/@hubermanlab"], "max_results": 3}

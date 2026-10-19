@@ -287,3 +287,28 @@ def test_the_recommendation_prompt_states_evidence_strength_in_words(jarrow, evi
     sent = transport.calls[0]["messages"][0]["content"]
     assert "/100" not in sent
     assert "1 claim(s) cite a study; 1 claim(s) disagree" in sent
+
+
+# ── Never call an unmeasured development a trend (Mark, 19 Oct) ─────────────
+
+
+def test_each_development_states_its_status(jarrow, approved):
+    Signal.objects.filter(code="SIG-3001").update(maturity=Signal.Maturity.RECURRING)
+
+    brief = brief_for(jarrow)
+    body = text_of(brief)
+
+    assert "Status. Recurring discussion: raised in more than one week" in body
+    assert "(recurring discussion)" in brief.sections[0]["text"]
+
+
+def test_the_recommendation_prompt_carries_the_status_and_the_rule(jarrow, evidence):
+    signal, claims = evidence
+    Signal.objects.filter(pk=signal.pk).update(maturity=Signal.Maturity.WATCH)
+    signal.refresh_from_db()
+
+    _, transport = shared.draft(jarrow, signal, **shared.grounded(claims))
+
+    call = transport.calls[0]
+    assert "Status: Watch item." in call["messages"][0]["content"]
+    assert "do not call it rising" in str(call["system"])

@@ -121,6 +121,31 @@ def _describe(item: ContentItem) -> str:
     return "\n".join(lines)
 
 
+#: Share of a title's letters outside the Latin alphabets above which an item
+#: is taken to be in another language. Deliberately crude, and stated as such:
+#: it catches a different SCRIPT (Japanese, Arabic, Cyrillic), not a different
+#: Latin-script language such as Spanish.
+NON_LATIN_SHARE = 0.3
+
+
+def language_mismatch(item: ContentItem) -> str:
+    """A reason to reject, if the item is not in the source's language."""
+    expected = ((item.source.config or {}).get("language") or "en").lower()
+    if expected != "en":
+        return ""
+    text = f"{item.title} {item.description[:300]}"
+    letters = [ch for ch in text if ch.isalpha()]
+    if len(letters) < 8:
+        return ""
+    foreign = sum(1 for ch in letters if ord(ch) > 0x24F)
+    if foreign / len(letters) <= NON_LATIN_SHARE:
+        return ""
+    return (
+        f"Not in English, the language this source is set to: "
+        f"{foreign / len(letters):.0%} of the title and description is in another script."
+    )
+
+
 def assess(
     item: ContentItem,
     *,
@@ -139,6 +164,18 @@ def assess(
         return GateResult(
             decision=item.gate_decision, reason=item.gate_reason, confidence=0
         )
+
+    mismatch = language_mismatch(item)
+    if mismatch:
+        # Decided without a model call: there is nothing to judge in content
+        # the extractor would then misread, and nothing to spend on it. The
+        # Japanese-language creatine video that reached two signals on 18–19 Oct
+        # is the case this exists for.
+        item.gate_decision = ContentItem.GateDecision.REJECTED
+        item.gate_reason = mismatch
+        item.gate_assessed_at = timezone.now()
+        item.save(update_fields=["gate_decision", "gate_reason", "gate_assessed_at"])
+        return GateResult(decision=item.gate_decision, reason=mismatch, confidence=100)
 
     llm = client or LLMClient()
     try:

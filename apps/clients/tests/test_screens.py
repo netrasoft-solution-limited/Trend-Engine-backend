@@ -499,3 +499,27 @@ def test_a_plain_operator_cannot_import_a_profile(client, plain_operator, jarrow
     )
 
     assert response.status_code == 403
+
+
+
+def test_the_product_template_keeps_url_and_notes():
+    spec = services.spec_from_csv(
+        "name,kind,terms,weight,url,notes\n"
+        "MagMind,product,magmind; threonate,90,https://jarrow.com/products/magmind-90-veggie-caps,"
+        "Verified 19 Oct\n"
+    )
+
+    asset = spec["assets"][0]
+    assert asset["notes"] == "https://jarrow.com/products/magmind-90-veggie-caps · Verified 19 Oct"
+
+
+def test_the_template_sent_to_mark_imports_cleanly():
+    from pathlib import Path
+
+    inputs = Path(__file__).resolve().parents[4] / "mark-inputs-2026-10-19"
+    template = inputs / "jarrow-products-template.csv"
+    if not template.exists():
+        pytest.skip("the inputs folder sits beside the repo, not in it")
+    spec = services.spec_from_csv(template.read_text())
+
+    assert len(spec["assets"]) == 8 and len(spec["audiences"]) == 3

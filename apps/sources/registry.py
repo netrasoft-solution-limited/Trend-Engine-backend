@@ -84,8 +84,8 @@ SPECS: dict[str, RouteSpec] = {
         route=Source.Route.YOUTUBE,
         label="YouTube",
         blurb=(
-            "Either a standing search, which finds creators you have not thought "
-            "of, or specific videos by address."
+            "A standing search, which finds creators you have not thought of; "
+            "channels to follow; or specific videos by address."
         ),
         fields=(
             Field(
@@ -96,13 +96,26 @@ SPECS: dict[str, RouteSpec] = {
                 help="One search per term, run on the schedule below.",
             ),
             Field(
+                key="channels",
+                label="…or channels to follow",
+                placeholder="https://www.youtube.com/@hubermanlab",
+                is_list=True,
+                help="Each channel's latest videos, up to the limit, on every run.",
+            ),
+            Field(
                 key="urls",
                 label="…or specific video addresses",
                 placeholder="https://www.youtube.com/watch?v=…",
                 is_list=True,
             ),
+            Field(
+                key="language",
+                label="Language",
+                placeholder="en",
+                help="Videos clearly in another script are set aside before any cost.",
+            ),
         ),
-        requires_one_of=("queries", "urls"),
+        requires_one_of=("queries", "channels", "urls"),
         provider_kind=AcquisitionProvider.Kind.APIFY,
     ),
     Source.Route.RESEARCH: RouteSpec(

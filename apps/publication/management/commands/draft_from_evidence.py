@@ -5,16 +5,24 @@ publishing — and `apps.publication` sits ABOVE `apps.outputs` in the layer
 stack, so only this side may import both. Put the other way round it reads
 just as naturally and `lint-imports` refuses it, which is how this landed here.
 
-The Output Builder screen (PRD §6.5) does not exist, and this is the seam that
-lets an output exist before it does. It calls the same three services a screen
-would — `draft`, `approve`, `record_expert_signoff` — and then
-`publication.publish()`, so nothing here is a shortcut around the gates:
+The Output Builder screen is the normal path now; this remains for scripting.
+It calls the same three services the screen does — `draft`, `approve`,
+`record_expert_signoff` — and then `publication.publish()`, so nothing here is
+a shortcut around the gates:
 
   · an unapproved version is refused by `NotApproved`
   · a health or scientific type without a recorded sign-off is refused by
     `ExpertReviewMissing`
 
 Both refusals are worth seeing, which is why `--skip-signoff` exists.
+
+CHANGED 20 OCT. This command produced the 1 October brief: from the whole
+corpus rather than a client's profile, under a fixed profile label that matched
+nothing stored, with a sign-off whose reviewer was whatever `--reviewer` said
+and whose note was written by this file. It now refuses without a live client
+profile, drafts from that profile, cites its stored version, and requires a
+registered reviewer who is not the actor. It writes no note on a reviewer's
+behalf.
 """
 from __future__ import annotations
 
@@ -33,8 +41,13 @@ class Command(BaseCommand):
     def add_arguments(self, parser) -> None:
         parser.add_argument("--org", required=True, help="Organisation slug, e.g. jarrow.")
         parser.add_argument("--title", default="", help="Defaults to a dated trend brief.")
-        parser.add_argument("--actor", default="abubakar@netrasoft", help="Recorded in the audit log.")
-        parser.add_argument("--reviewer", default="", help="Named expert reviewer.")
+        parser.add_argument(
+            "--actor", default="abubakar@netrasoft", help="Recorded in the audit log."
+        )
+        parser.add_argument(
+            "--reviewer", default="", help="A registered expert reviewer (expert_reviewer list)."
+        )
+        parser.add_argument("--note", default="", help="The reviewer's own note, if any.")
         parser.add_argument(
             "--dry-run", action="store_true", help="Print the sections and write nothing."
         )
@@ -56,11 +69,25 @@ class Command(BaseCommand):
     def _run(self, options) -> None:
         from django.utils import timezone
 
-        sections = drafting.sections_from_claims()
-        if not sections:
-            raise CommandError(
-                "No claims to draft from. Run the pipeline first — nothing is invented here."
-            )
+        organization = Organization.objects.filter(slug=options["org"]).first()
+        if organization is None:
+            raise CommandError(f"No organisation with slug {options['org']!r}.")
+
+        from apps.clients import services as client_services
+        from apps.enrichment.domain import DOMAIN_PACK_VERSION
+        from apps.tenancy.context import scoped
+
+        with scoped(organization):
+            profile = client_services.current_for(organization)
+            if profile is None:
+                raise CommandError(
+                    f"{organization} has no live client profile. A brief is drafted for a "
+                    f"client, against the profile version it cites."
+                )
+            try:
+                sections = drafting.sections_for(organization)
+            except services.DraftingError as exc:
+                raise CommandError(str(exc)) from exc
 
         if options["dry_run"]:
             for section in sections:
@@ -69,9 +96,8 @@ class Command(BaseCommand):
             self.stdout.write(f"\n{len(sections)} sections. Nothing written.")
             return
 
-        organization = Organization.objects.filter(slug=options["org"]).first()
-        if organization is None:
-            raise CommandError(f"No organisation with slug {options['org']!r}.")
+        if not options["skip_signoff"] and not options["reviewer"]:
+            raise CommandError("Name the registered expert reviewer with --reviewer.")
 
         title = options["title"] or f"Category brief — {timezone.now():%B %Y}"
         actor = options["actor"]
@@ -86,20 +112,23 @@ class Command(BaseCommand):
                 "and timestamped so every line can be checked against its source."
             ),
             actor_label=actor,
-            client_profile_version="jarrow@2026-10-01",
-            domain_pack_version="supplements@0.1.0",
+            client_profile_version=profile.citation,
+            domain_pack_version=DOMAIN_PACK_VERSION,
         )
         self.stdout.write(f"  drafted  v{version.number} — {len(sections)} sections")
 
         if not options["skip_signoff"]:
-            reviewer = options["reviewer"] or actor
-            services.record_expert_signoff(
-                version.output,
-                reviewer_label=reviewer,
-                discipline="Scientific / legal claims",
-                note="Quotes verified verbatim against stored transcripts.",
-            )
-            self.stdout.write(f"  signed   expert review recorded by {reviewer}")
+            try:
+                services.record_expert_signoff(
+                    version.output,
+                    reviewer_label=options["reviewer"],
+                    actor_label=actor,
+                    discipline="Scientific / legal claims",
+                    note=options["note"],
+                )
+            except services.DraftingError as exc:
+                raise CommandError(str(exc)) from exc
+            self.stdout.write(f"  signed   expert review recorded by {options['reviewer']}")
 
         services.approve(version, actor_label=actor)
         self.stdout.write("  approved internal sign-off — NOT client-visible yet")

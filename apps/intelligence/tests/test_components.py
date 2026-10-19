@@ -21,27 +21,57 @@ def fact(item, *, creator="A", route="podcast", days_ago=1, cited=False):
     )
 
 
-def score(supporting, contradicting=(), *, watched_days=60, first_seen_days=0):
+def coverage(covered_weeks: int, *, weeks: int = 6) -> list[dict]:
+    """Weekly collection coverage, newest first: the first `covered_weeks` covered."""
+    return [
+        {"relevant_transcribed": 12 if i < covered_weeks else 4, "sources": 4,
+         "covered": i < covered_weeks}
+        for i in range(weeks)
+    ]
+
+
+def score(supporting, contradicting=(), *, covered_weeks=6, first_seen_days=0):
     return components.score(
         supporting,
         contradicting,
         now=NOW,
-        watching_since=NOW - timedelta(days=watched_days),
+        watching_since=NOW - timedelta(days=60),
         first_seen_at=NOW - timedelta(days=first_seen_days),
+        coverage=coverage(covered_weeks),
     )
 
 
 # ── A missing input is missing ──────────────────────────────────────────────
 
 
-def test_a_young_corpus_has_no_momentum_and_says_why():
-    """Prod began collecting on 1 October; until early November there is no
-    28-day baseline, and the screen must say so rather than show a number."""
-    scored = score([fact(1), fact(2, creator="B")], watched_days=12)
+def test_thin_coverage_has_no_momentum_and_says_why():
+    """Mark, 19 Oct: measurement depends on adequate, consistent coverage as
+    well as elapsed time. Two covered weeks is not a 28-day baseline."""
+    scored = score([fact(1), fact(2, creator="B")], covered_weeks=2)
 
     assert scored.components["momentum"]["value"] is None
-    assert "has 12" in scored.components["momentum"]["detail"]
+    assert "2 so far" in scored.components["momentum"]["detail"]
     assert scored.components["acceleration"]["value"] is None
+
+
+def test_a_gap_in_coverage_breaks_the_run():
+    rows = coverage(6)
+    rows[1]["covered"] = False
+    scored = components.score(
+        [fact(1)], now=NOW, watching_since=NOW - timedelta(days=60), first_seen_at=NOW,
+        coverage=rows,
+    )
+
+    assert scored.baseline["covered_streak"] == 1
+    assert scored.components["momentum"]["value"] is None
+
+
+def test_no_coverage_data_means_nothing_is_measured():
+    scored = components.score(
+        [fact(1)], now=NOW, watching_since=NOW - timedelta(days=60), first_seen_at=NOW,
+    )
+
+    assert scored.components["momentum"]["value"] is None
 
 
 def test_engagement_is_never_invented():
@@ -52,7 +82,7 @@ def test_engagement_is_never_invented():
 
 
 def test_the_score_is_the_weighted_mean_of_what_is_available():
-    scored = score([fact(1), fact(2, creator="B")], watched_days=12)
+    scored = score([fact(1), fact(2, creator="B")], covered_weeks=0)
     available = {k: c for k, c in scored.components.items() if c["value"] is not None}
 
     expected = round(
@@ -144,3 +174,37 @@ def test_corroboration_across_source_types_raises_confidence():
     mixed = score([fact(1), fact(2, creator="B", route="youtube")])
 
     assert mixed.confidence > podcasts.confidence
+
+
+
+# ── Explicit about what the score rests on (Mark, 19 Oct) ───────────────────
+
+
+def test_effective_weights_are_recorded_and_sum_to_one_hundred():
+    scored = score([fact(1), fact(2, creator="B")], covered_weeks=0)
+    c = scored.components
+
+    assert c["source_diversity"]["effective_weight"] == 33.3
+    assert c["recency"]["effective_weight"] == 11.1
+    assert c["momentum"]["effective_weight"] is None
+    total = sum(x["effective_weight"] for x in c.values() if x["effective_weight"])
+    assert round(total) == 100
+    assert scored.baseline["weighting_share"] == 45, "the score rests on 45% of the plan"
+
+
+def test_unmeasured_evidence_spanning_weeks_is_a_recurring_discussion():
+    scored = score([fact(1, days_ago=1), fact(2, creator="B", days_ago=9)], covered_weeks=0)
+
+    assert scored.maturity == components.RECURRING
+
+
+def test_a_single_week_unmeasured_is_a_watch_item():
+    assert score([fact(1), fact(2, creator="B")], covered_weeks=0).maturity == components.WATCH
+
+
+def test_only_measured_rising_momentum_is_a_trend():
+    baseline = [fact(i, days_ago=8 + 7 * (i % 4)) for i in range(4)]
+    surge = [fact(100 + i, creator=f"C{i}", days_ago=1) for i in range(4)]
+
+    assert score(baseline + surge).maturity == components.MEASURED_TREND
+    assert score(baseline + surge, covered_weeks=0).maturity != components.MEASURED_TREND

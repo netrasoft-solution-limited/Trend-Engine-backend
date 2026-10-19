@@ -179,3 +179,52 @@ def test_another_clients_recommendation_cannot_be_used(
     assert "Choose the approved recommendation" in response.content.decode()
     with operator_scope():
         assert not Output.objects.exists()
+
+
+# ── Sign-off and record notes on the output page (Mark, 19 Oct) ────────────
+
+
+def _brief(client, admin, organization):
+    client.force_login(admin)
+    _draft(client, organization)
+    with scoped(organization):
+        return Output.objects.get()
+
+
+def test_an_unregistered_reviewer_is_refused_on_screen(client, admin, real_client, approved):
+    output = _brief(client, admin, real_client)
+
+    response = client.post(
+        reverse("ops-output-signoff", args=[output.pk]),
+        {"reviewer": "Dr M. Alvarez, nutrition science"},
+        follow=True,
+    )
+
+    assert "not a registered expert reviewer" in response.content.decode()
+    with scoped(real_client):
+        assert not output.expert_reviews.exists()
+
+
+def test_the_signoff_form_offers_registered_reviewers_only(client, admin, real_client, approved):
+    from apps.outputs.models import ExpertReviewer
+
+    ExpertReviewer.objects.create(name="Dr Jane Doe", qualification="RD", email="jane@r.test")
+    output = _brief(client, admin, real_client)
+
+    page = client.get(reverse("ops-output", args=[output.pk])).content.decode()
+
+    assert '<option value="Dr Jane Doe">' in page
+
+
+def test_record_notes_show_on_the_output_and_in_the_list(client, admin, real_client, approved):
+    from apps.outputs import services
+
+    output = _brief(client, admin, real_client)
+    with scoped(real_client):
+        services.add_record_note(output, text="No client profile existed.", author_label="abu")
+
+    detail = client.get(reverse("ops-output", args=[output.pk])).content.decode()
+    listing = client.get(reverse("ops-outputs")).content.decode()
+
+    assert "No client profile existed." in detail
+    assert "record note" in listing

@@ -48,7 +48,7 @@ from .models import ClientSignalScore, Recommendation
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "recommendation/2026-10-13c"
+PROMPT_VERSION = "recommendation/2026-10-20"
 
 #: Example Outputs B1's owners. Anything else is mapped to the nearest
 #: catch-all rather than stored as whatever the model invented.
@@ -111,6 +111,9 @@ review. If the evidence is contested, say so in `limits`.
 efficacy, a podcast claim is not a trial result.
 - Never quote internal measures (scores, confidence numbers, ranks). Describe \
 the strength of the evidence in words.
+- Respect the development's status. Unless it is a "Measured rising trend", do \
+not call it rising, growing, surging or a trend: call it a recurring discussion \
+or something to watch, and size the actions to that.
 - If this development does not justify any action for this brand, set \
 decline_reason and leave the rest empty. That is a correct answer."""
 
@@ -296,6 +299,7 @@ def _render(organization, profile, signal: Signal, evidence: list[SignalEvidence
         f"### Priorities\n{rows(ClientTerm.Facet.PRIORITY)}\n\n"
         f"### Competitors\n{rows(ClientTerm.Facet.COMPETITOR)}\n\n"
         f"## The development: {signal.title}\n\n{signal.statement}\n\n"
+        f"Status: {signal.get_maturity_display()}. "
         f"Type: {signal.get_signal_type_display() or 'unspecified'}. "
         # In words, not as our 0–100 measures: whatever the model is shown, it
         # may repeat, and these sentences are read by the brand.

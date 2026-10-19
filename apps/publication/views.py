@@ -48,6 +48,7 @@ from apps.operations.permissions import require_platform_admin
 from apps.outputs import exports, services
 from apps.outputs.exports.adapters import document_for_version
 from apps.outputs.models import (
+    ExpertReviewer,
     ExportArtifact,
     Output,
     OutputType,
@@ -80,7 +81,11 @@ class OutputListView(View):
         with operator_scope():
             organizations = list(Organization.objects.all())
             for output in Output.objects.select_related("organization").all():
-                rows.append({"obj": output, "versions": output.versions.count()})
+                rows.append({
+                    "obj": output,
+                    "versions": output.versions.count(),
+                    "notes": output.record_notes.count(),
+                })
 
         return render(
             request,
@@ -193,6 +198,7 @@ class OutputDetailView(View):
             publications = list(output.publications.order_by("-published_at")[:5])
             live = next((p for p in publications if p.is_live), None)
             reviews = list(output.expert_reviews.all())
+            record_notes = list(output.record_notes.all())
             deliveries = list(live.deliveries.all()[:5]) if live else []
             from apps.clients.contacts import recipients_for
 
@@ -210,6 +216,8 @@ class OutputDetailView(View):
                 "publications": publications,
                 "reviews": reviews,
                 "signed_off": any(r.is_signed_off for r in reviews),
+                "reviewers": list(ExpertReviewer.objects.filter(is_active=True)),
+                "record_notes": record_notes,
                 "deliveries": deliveries,
                 "recipients": recipients,
                 "formats": [(f, exports.LABELS.get(f, f)) for f in exports.available()],
@@ -248,6 +256,7 @@ class OutputSignoffView(View):
                 services.record_expert_signoff(
                     output,
                     reviewer_label=(request.POST.get("reviewer") or "").strip(),
+                    actor_label=_actor(request),
                     discipline=(request.POST.get("discipline") or "").strip(),
                     note=(request.POST.get("note") or "").strip(),
                 )

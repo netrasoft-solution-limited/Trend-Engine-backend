@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Min
 from django.db.models.functions import Coalesce
@@ -139,6 +140,9 @@ class DetectionResult:
     extended: list[str] = field(default_factory=list)
     dropped_unknown_ids: int = 0
     dropped_single_source: int = 0
+    #: Proposed as new, but their evidence was already an open signal's — kept
+    #: as extensions of it. See `_already_open`.
+    reused: list[str] = field(default_factory=list)
     rescored: int = 0
     skipped: str = ""
 
@@ -153,7 +157,7 @@ def window_claims(now: datetime) -> list[Claim]:
         Claim.objects.filter(is_sponsored=False)
         .annotate(said_at=evidence_date())
         .filter(said_at__gte=now - timedelta(days=WINDOW_DAYS))
-        .select_related("content_item__source")
+        .select_related("content_item__source", "content_item__duplicate_of__source")
         .order_by("-said_at", "-pk")[:MAX_CLAIMS]
     )
 
@@ -165,7 +169,7 @@ def detect(*, client: LLMClient | None = None, now: datetime | None = None) -> D
 
     claims = window_claims(now)
     result.claims_considered = len(claims)
-    if len({c.content_item_id for c in claims}) < 2:
+    if len({_conversation(c) for c in claims}) < 2:
         result.skipped = "fewer than two items with claims in the window"
         result.rescored = rescore_open(now=now)
         return result
@@ -201,9 +205,9 @@ def detect(*, client: LLMClient | None = None, now: datetime | None = None) -> D
     result.rescored = rescore_open(now=now)
     logger.info(
         "Detection over %d claims: %d new, %d extended, %d invented ID(s) dropped, "
-        "%d single-item proposal(s) dropped",
+        "%d single-item proposal(s) dropped, %d duplicate proposal(s) kept as extensions",
         result.claims_considered, len(result.created), len(result.extended),
-        result.dropped_unknown_ids, result.dropped_single_source,
+        result.dropped_unknown_ids, result.dropped_single_source, len(result.reused),
     )
     return result
 
@@ -219,7 +223,9 @@ def _apply(proposed, by_id, open_signals, model_run, now, result) -> None:
         - len(supporting) - len(contradicting)
     )
 
-    if len({by_id[i].content_item_id for i in supporting}) < 2:
+    # Distinct CONVERSATIONS, not items: a podcast and its YouTube upload are
+    # one voice saying one thing, however many times it was published.
+    if len({_conversation(by_id[i]) for i in supporting}) < 2:
         result.dropped_single_source += 1
         return
 
@@ -228,6 +234,14 @@ def _apply(proposed, by_id, open_signals, model_run, now, result) -> None:
         else Signal.Type.CONVERGENCE
     )
     signal = open_signals.get(proposed.extends_code.strip())
+    if signal is None:
+        # The model sometimes proposes a development it already proposed,
+        # rather than extending it — SIG-3006 and SIG-3007 on 18–19 Oct were one
+        # creatine-dose development with the same claims. Identity is decided
+        # by evidence here, not by the model's choice of field.
+        signal = _already_open(supporting, open_signals)
+        if signal is not None:
+            result.reused.append(signal.code)
     if signal is not None:
         # The wording of a signal an operator has already acted on is what they
         # reviewed; new evidence attaches to it without rewriting it.
@@ -264,6 +278,34 @@ def _apply(proposed, by_id, open_signals, model_run, now, result) -> None:
             )
 
 
+#: Share of a proposal's supporting claims that, already supporting one open
+#: signal, make the proposal that signal rather than a new one.
+SAME_SIGNAL_OVERLAP = 0.5
+
+
+def _already_open(supporting: list[int], open_signals: dict) -> Signal | None:
+    if not supporting:
+        return None
+    counts: dict[int, int] = {}
+    for signal_id in SignalEvidence.objects.filter(
+        claim_id__in=supporting,
+        role=SignalEvidence.Role.SUPPORTS,
+        signal__in=list(open_signals.values()),
+    ).values_list("signal_id", flat=True):
+        counts[signal_id] = counts.get(signal_id, 0) + 1
+    if not counts:
+        return None
+    best_id, shared = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))
+    if shared / len(supporting) < SAME_SIGNAL_OVERLAP:
+        return None
+    return next(s for s in open_signals.values() if s.pk == best_id)
+
+
+def _conversation(claim: Claim) -> int:
+    """The item a claim counts under: itself, or what it duplicates."""
+    return claim.content_item.canonical.pk
+
+
 def _next_code() -> str:
     numbers = [
         int(m.group(1))
@@ -276,7 +318,7 @@ def _next_code() -> str:
 def _render(claims: list[Claim], open_signals) -> str:
     lines = []
     for claim in claims:
-        item = claim.content_item
+        item = claim.content_item.canonical
         tags = [claim.kind] + (["cites a study"] if claim.is_cited else [])
         lines.append(
             f"C{claim.pk} | I{item.pk} | {item.creator or 'unattributed'} | "
@@ -301,7 +343,47 @@ def watching_since() -> datetime | None:
     return ContentItem.objects.aggregate(first=Min("discovered_at"))["first"]
 
 
-def rescore(signal: Signal, *, now: datetime, since: datetime | None = None) -> Signal:
+def weekly_coverage(now: datetime, *, weeks: int = 6) -> list[dict]:
+    """The whole collection's coverage per 7-day week, newest first.
+
+    Relevant, transcribed, not a duplicate, by evidence date — the same weeks
+    `components` counts a signal's support in. A week is COVERED when it meets
+    both thresholds in settings; momentum and acceleration are measured only
+    over unbroken runs of covered weeks.
+    """
+    min_items = settings.SIGNAL_COVERED_WEEK_MIN_ITEMS
+    min_sources = settings.SIGNAL_COVERED_WEEK_MIN_SOURCES
+    items = list(
+        ContentItem.objects.filter(
+            gate_decision__in=(ContentItem.GateDecision.RELEVANT, ContentItem.GateDecision.SAMPLED),
+            content_state=ContentItem.ContentState.TRANSCRIBED,
+        )
+        .exclude(duplicate_status="confirmed")
+        .annotate(said_at=Coalesce("published_at", "discovered_at"))
+        .filter(said_at__gte=now - timedelta(days=7 * weeks))
+        .values_list("said_at", "source_id")
+    )
+    rows = []
+    for index in range(weeks):
+        end, start = now - timedelta(days=7 * index), now - timedelta(days=7 * (index + 1))
+        in_week = [source for at, source in items if start <= at < end]
+        count, sources = len(in_week), len(set(in_week))
+        rows.append({
+            "week_ending": end.date().isoformat(),
+            "relevant_transcribed": count,
+            "sources": sources,
+            "covered": count >= min_items and sources >= min_sources,
+        })
+    return rows
+
+
+def rescore(
+    signal: Signal,
+    *,
+    now: datetime,
+    since: datetime | None = None,
+    coverage: list[dict] | None = None,
+) -> Signal:
     """Recompute every component from the stored evidence.
 
     Run after detection and again on every scheduled run, because momentum,
@@ -310,9 +392,11 @@ def rescore(signal: Signal, *, now: datetime, since: datetime | None = None) -> 
     facts = {SignalEvidence.Role.SUPPORTS: [], SignalEvidence.Role.CONTRADICTS: []}
     for row in (
         SignalEvidence.objects.filter(signal=signal)
-        .select_related("claim__content_item__source")
+        .select_related("claim__content_item__source", "claim__content_item__duplicate_of__source")
     ):
-        item = row.claim.content_item
+        # Counted as the conversation it belongs to: a re-upload or a clip adds
+        # no item, no creator and no source type (PRD §6.3).
+        item = row.claim.content_item.canonical
         facts[row.role].append(
             components.Fact(
                 item_id=item.pk,
@@ -331,8 +415,10 @@ def rescore(signal: Signal, *, now: datetime, since: datetime | None = None) -> 
         now=now,
         watching_since=since if since is not None else watching_since(),
         first_seen_at=signal.first_seen_at,
+        coverage=coverage if coverage is not None else weekly_coverage(now),
     )
     signal.domain_score = scored.domain_score
+    signal.maturity = scored.maturity
     signal.components = scored.components
     signal.baseline = scored.baseline
     signal.confidence = scored.confidence
@@ -345,6 +431,7 @@ def rescore(signal: Signal, *, now: datetime, since: datetime | None = None) -> 
     signal.save(
         update_fields=[
             "domain_score", "components", "baseline", "confidence", "confidence_reasons",
+            "maturity",
             "item_count", "creator_count", "source_count", "scored_at",
             "awaiting_operator_judgment",
         ]
@@ -353,8 +440,8 @@ def rescore(signal: Signal, *, now: datetime, since: datetime | None = None) -> 
 
 
 def rescore_open(*, now: datetime) -> int:
-    since = watching_since()
+    since, coverage = watching_since(), weekly_coverage(now)
     signals = Signal.objects.filter(state__in=OPEN_STATES, is_illustrative=False)
     for signal in signals:
-        rescore(signal, now=now, since=since)
+        rescore(signal, now=now, since=since, coverage=coverage)
     return len(signals)

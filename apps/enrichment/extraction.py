@@ -217,6 +217,11 @@ def extract(
         # manufacture exactly the false confidence that rule prevents.
         return ExtractionResult(0, 0, 0, skipped="metadata-only")
 
+    if item.is_duplicate:
+        # Recorded as the same conversation as another item, whose claims stand
+        # for both (`apps.evidence.services.duplicates`).
+        return ExtractionResult(0, 0, 0, skipped="same conversation as another item")
+
     if item.claims.exists() or item.questions.exists():
         return ExtractionResult(
             item.claims.count(), item.questions.count(), 0, skipped="already extracted"

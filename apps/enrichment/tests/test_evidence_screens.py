@@ -248,3 +248,21 @@ def test_an_item_with_no_transcript_says_claims_need_one(client, operator, rejec
 )
 def test_link_at(url, seconds, expected):
     assert ContentItem(url=url).link_at(seconds) == expected
+
+
+def test_an_item_says_when_it_is_the_same_conversation_as_another(
+    client, operator, transcribed, run
+):
+    upload = _item(
+        run, "vid-9", content_state=ContentItem.ContentState.TRANSCRIBED,
+        duplicate_of=transcribed, duplicate_status="confirmed",
+        duplicate_reason="re-upload: 98% of the shorter transcript appears in the longer",
+    )
+    client.force_login(operator)
+
+    page = client.get(reverse("ops-item", args=[upload.pk])).content.decode()
+    original = client.get(reverse("ops-item", args=[transcribed.pk])).content.decode()
+
+    assert "Same conversation as" in page and "98%" in page
+    assert "adds no item, creator or source type" in page
+    assert "Also published as" in original

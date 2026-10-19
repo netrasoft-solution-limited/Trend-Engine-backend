@@ -17,6 +17,7 @@
             <td>
               <a href="{% url 'ops-output' row.obj.pk %}">{{ row.obj.title }}</a>
               {% if row.obj.is_illustrative %}<span class="pill illustrative">illustrative</span>{% endif %}
+              {% if row.notes %}<span class="pill illustrative">record note</span>{% endif %}
             </td>
             <td class="muted">{{ row.obj.organization.name }}</td>
             <td class="muted">{{ row.obj.get_type_display }}</td>

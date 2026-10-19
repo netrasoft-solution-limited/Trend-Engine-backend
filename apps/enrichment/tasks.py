@@ -18,7 +18,7 @@ import logging
 from celery import shared_task
 
 from apps.evidence.models import ContentItem
-from apps.evidence.services import transcripts
+from apps.evidence.services import duplicates, transcripts
 
 from . import extraction, gate
 from .domain import domain_pack
@@ -80,6 +80,17 @@ def acquire_transcript(self, content_item_id: int) -> dict:
     outcome = transcripts.acquire(item)
 
     if outcome.succeeded:
+        # Same conversation as something already held? A podcast's YouTube
+        # upload or a clip of it is not extracted: it would re-buy claims the
+        # canonical item has, and then count them as independent confirmation.
+        match = duplicates.check(item)
+        item.refresh_from_db()
+        if item.is_duplicate:
+            return {
+                "method": outcome.method,
+                "duplicate_of": item.duplicate_of_id,
+                "reason": match.reason if match else "",
+            }
         # Only now is there anything to extract from.
         extract_evidence.delay(item.pk)
     elif outcome.retryable:

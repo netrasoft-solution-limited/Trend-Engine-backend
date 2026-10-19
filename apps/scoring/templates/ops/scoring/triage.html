@@ -89,11 +89,13 @@ how much it matters to them, how sure we are, and what has been decided.
                 <a href="{% url 'ops-signal' organization.slug s.code %}">{{ s.title }}</a>
                 {% if s.is_illustrative %}<span class="pill illustrative">illustrative</span>{% endif %}
                 {% if s.needs_scientific_routing %}<span class="pill">needs expert</span>{% endif %}
+                {% if not s.is_illustrative %}<span class="pill {% if s.maturity == 'measured_trend' %}live{% endif %}">{{ s.get_maturity_display }}</span>{% endif %}
                 <div class="note" style="margin-top:2px">
                   {{ s.code }}{% if s.signal_type %} · {{ s.get_signal_type_display }}{% endif %}
                   {% if not s.is_illustrative %}
                     · {{ s.item_count }} item(s), {{ s.creator_count }} creator(s)
                     · score rests on {{ s.available }} of {{ s.component_total }} components
+                    ({{ s.baseline.weighting_share|default:"?" }}% of the weighting)
                   {% endif %}
                 </div>
               </td>

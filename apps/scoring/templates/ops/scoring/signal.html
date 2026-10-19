@@ -16,6 +16,7 @@ operator decide each of those.
     · <b>{{ signal.get_state_display }}</b>
     {% if signal.is_illustrative %}<span class="pill illustrative">illustrative — seeded, not detected</span>{% endif %}
     {% if signal.needs_scientific_routing %}<span class="pill">needs expert review</span>{% endif %}
+    <span class="pill {% if signal.maturity == 'measured_trend' %}live{% else %}illustrative{% endif %}">{{ signal.get_maturity_display }}</span>
   </p>
 
   <div class="card">
@@ -36,14 +37,19 @@ operator decide each of those.
         <span class="state"><b style="font-size:20px">{{ signal.domain_score }}</b> / 100</span>
       </div>
       <p class="note">
-        Rests on {{ available.0 }} of {{ available.1 }} components. Missing ones are
-        left out of the average rather than counted as zero.
+        Rests on {{ available.0 }} of {{ available.1 }} components —
+        <b>{{ signal.baseline.weighting_share|default:"?" }}% of the plan's weighting</b>.
+        Missing ones are left out of the average rather than counted as zero, so each
+        remaining component carries more weight than planned: plan weight → weight in this score.
+        {% if signal.maturity != "measured_trend" %}Until momentum is measured this is a
+        <b>{{ signal.get_maturity_display|lower }}</b>, not a measured trend.{% endif %}
       </p>
       <table>
         <tbody>
           {% for c in components %}
             <tr>
-              <td style="width:40%">{{ c.label }} <span class="muted">· {{ c.weight }}%</span>
+              <td style="width:40%">{{ c.label }}
+                <span class="muted">· {{ c.weight }}%{% if c.effective_weight is not None %} → {{ c.effective_weight }}%{% else %} → not counted{% endif %}</span>
                 <div class="note" style="margin-top:2px">{{ c.detail }}</div>
               </td>
               <td style="width:40%;vertical-align:middle">
@@ -78,10 +84,32 @@ operator decide each of those.
           </div>
         {% endif %}
         <p class="note">
-          {{ signal.item_count }} item(s) from {{ signal.creator_count }} creator(s) across
-          {{ signal.source_count }} source type(s).
+          {{ signal.item_count }} conversation(s) from {{ signal.creator_count }} creator(s) across
+          {{ signal.source_count }} source type(s); re-uploads and clips counted once.
           {% if signal.baseline.watching_since %}Collection began {{ signal.baseline.watching_since }} ({{ signal.baseline.watched_days }} days).{% endif %}
         </p>
+        {% if coverage %}
+          <table style="margin-top:8px">
+            <thead><tr><th>Week ending</th><th class="num">Supporting</th><th class="num">Collected</th><th class="num">Sources</th><th>Counts towards a baseline</th></tr></thead>
+            <tbody>
+              {% for w in coverage %}
+                <tr>
+                  <td class="muted">{{ w.week_ending }}</td>
+                  <td class="num">{{ w.supporting }}</td>
+                  <td class="num">{{ w.relevant_transcribed }}</td>
+                  <td class="num">{{ w.sources }}</td>
+                  <td>{% if w.covered %}<span class="state stored">yes</span>{% else %}<span class="state missing">no</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="note">
+            "Collected" is every relevant, transcribed item that week, duplicates excluded. A week
+            counts towards a baseline with at least {{ covered_week.items }} from at least
+            {{ covered_week.sources }} sources; momentum needs 5 such weeks in a row
+            ({{ signal.baseline.covered_streak|default:0 }} so far), acceleration 3.
+          </p>
+        {% endif %}
       </div>
     </div>
   </div>

@@ -86,6 +86,19 @@ class Signal(models.Model):
     #: Weekly item counts behind momentum and acceleration, and how long the
     #: corpus has been watched — the measurement the score was taken against.
     baseline = models.JSONField(default=dict, blank=True)
+    class Maturity(models.TextChoices):
+        """What the development can honestly be called (Mark, 19 Oct): only a
+        measured, rising momentum makes a trend; until coverage supports that
+        measurement it is a recurring discussion or a watch item."""
+
+        MEASURED_TREND = "measured_trend", "Measured rising trend"
+        RECURRING = "recurring", "Recurring discussion"
+        WATCH = "watch", "Watch item"
+
+    maturity = models.CharField(
+        max_length=20, choices=Maturity.choices, default=Maturity.WATCH, blank=True
+    )
+
     #: PRD §6.3: confidence is tracked separately from importance.
     confidence = models.PositiveSmallIntegerField(default=0, validators=SCORE_VALIDATORS)
     confidence_reasons = models.JSONField(default=list, blank=True)
