@@ -47,6 +47,12 @@ DRAFT_NOTICE = "DRAFT — NOT PUBLISHED"
 #: be lost the moment the file was forwarded.
 ILLUSTRATIVE_NOTICE = "ILLUSTRATIVE — DEMONSTRATION CONTENT, NOT A FINDING"
 
+#: Shown when the record behind the document has been corrected. Mark, 20 Oct:
+#: "an app-only note will not protect someone downloading the old file". The
+#: correction itself is the first section of every export from then on.
+CORRECTION_NOTICE = "CORRECTED RECORD — READ THE CORRECTION BEFORE USING THIS DOCUMENT"
+CORRECTION_HEADING = "Correction to this record"
+
 #: Used as document metadata when there is no publication date. Any fixed
 #: value; what matters is that it is not the clock.
 STABLE_FALLBACK_DATE = date(1980, 1, 1)
@@ -85,19 +91,22 @@ class ExportDocument:
     dated: date | None = None
     provenance: Provenance = field(default_factory=Provenance)
     is_illustrative: bool = False
+    is_corrected: bool = False
 
     @property
     def notice(self) -> str:
         """Every warning the document carries, on one line. Renderers print
         this when `has_notice`; none of them decides on its own which apply."""
-        parts = [ILLUSTRATIVE_NOTICE] if self.is_illustrative else []
+        parts = [CORRECTION_NOTICE] if self.is_corrected else []
+        if self.is_illustrative:
+            parts.append(ILLUSTRATIVE_NOTICE)
         if self.is_draft:
             parts.append(DRAFT_NOTICE)
         return " · ".join(parts)
 
     @property
     def has_notice(self) -> bool:
-        return self.is_draft or self.is_illustrative
+        return self.is_draft or self.is_illustrative or self.is_corrected
 
     @property
     def metadata_date(self) -> str:
@@ -137,6 +146,7 @@ def document_from_body(
     dated: date | None = None,
     provenance: Provenance | None = None,
     is_illustrative: bool = False,
+    corrections: tuple[str, ...] | list[str] = (),
 ) -> ExportDocument:
     """Build a document from the stored `body` shape.
 
@@ -150,7 +160,14 @@ def document_from_body(
         type_label=type_label,
         organization_name=organization_name,
         summary=summary,
+        # Corrections come FIRST, before anything the original document says,
+        # so a reader cannot reach the content without passing them.
         sections=tuple(
+            Section(heading=CORRECTION_HEADING, blocks=blocks(text))
+            for text in corrections
+            if text and text.strip()
+        )
+        + tuple(
             Section(heading=str(entry.get("heading") or ""), blocks=blocks(str(entry.get("text") or "")))
             for entry in (body or [])
         ),
@@ -158,4 +175,5 @@ def document_from_body(
         dated=dated,
         provenance=provenance or Provenance(),
         is_illustrative=is_illustrative,
+        is_corrected=any(text and text.strip() for text in corrections),
     )

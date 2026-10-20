@@ -199,7 +199,7 @@ class OutputDetailView(View):
             live = next((p for p in publications if p.is_live), None)
             reviews = list(output.expert_reviews.all())
             record_notes = list(output.record_notes.all())
-            deliveries = list(live.deliveries.all()[:5]) if live else []
+            deliveries = list(live.deliveries.order_by("-sent_at")[:5]) if live else []
             from apps.clients.contacts import recipients_for
 
             recipients = recipients_for(organization)

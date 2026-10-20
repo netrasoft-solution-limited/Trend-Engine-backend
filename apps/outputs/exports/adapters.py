@@ -30,6 +30,7 @@ def document_for_version(version, *, is_draft: bool | None = None) -> ExportDocu
         body=version.body,
         is_draft=is_draft,
         is_illustrative=output.is_illustrative,
+        corrections=[note.text for note in output.record_notes.order_by("at")],
         dated=None,
         provenance=Provenance(
             version_number=version.number,

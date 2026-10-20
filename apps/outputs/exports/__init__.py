@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from .document import (  # noqa: F401 — the public surface of this package
+    CORRECTION_NOTICE,
     DRAFT_NOTICE,
     ILLUSTRATIVE_NOTICE,
     RENDERER_VERSION,

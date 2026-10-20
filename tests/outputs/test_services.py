@@ -305,16 +305,33 @@ def test_a_record_note_is_append_only_and_audited(org):
     assert AuditEvent.objects.filter(message__startswith="Record note added").exists()
 
 
-def test_a_record_note_never_reaches_an_export(org):
+def test_every_export_of_a_corrected_output_opens_with_the_correction(org):
+    """Mark, 20 Oct: an app-only note does not protect someone downloading the
+    old file. The correction goes first, in every format, under a notice."""
     from apps.outputs import exports
     from apps.outputs.exports.adapters import document_for_version
 
     version = drafted(org)
-    services.add_record_note(version.output, text="Internal correction.", author_label="abu")
+    services.add_record_note(
+        version.output, text="No expert review supports the recorded sign-off.", author_label="abu"
+    )
 
-    html = exports.render(document_for_version(version), "html").content.decode()
+    document = document_for_version(version)
+    assert document.sections[0].heading == "Correction to this record"
+    for fmt in ("html", "markdown", "csv"):
+        body = exports.render(document, fmt).content.decode()
+        assert exports.CORRECTION_NOTICE in body, fmt
+        assert "No expert review supports the recorded sign-off." in body, fmt
+        assert body.index("No expert review") < body.index("Magnesium glycinate mentions"), fmt
 
-    assert "Internal correction." not in html
+
+def test_an_uncorrected_output_carries_no_correction_notice(org):
+    from apps.outputs import exports
+    from apps.outputs.exports.adapters import document_for_version
+
+    html = exports.render(document_for_version(drafted(org)), "html").content.decode()
+
+    assert exports.CORRECTION_NOTICE not in html
 
 
 def test_audit_events_cannot_be_changed_or_removed(org):

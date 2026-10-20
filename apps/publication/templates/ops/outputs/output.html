@@ -18,7 +18,15 @@
       {% if live %}
         v{{ live.version_number }} published {{ live.published_at|date:"j M Y, H:i" }} by
         {{ live.published_by_label }}.
-        {% if live.notified_at %}Sent to the client {{ live.notified_at|date:"j M Y, H:i" }}.
+        {% comment %}"Sent" only with a delivery record behind it. The 1 October brief
+        showed "Sent to the client" from a notification timestamp alone, with
+        no delivery and nobody at the client receiving anything.{% endcomment %}
+        {% if deliveries %}
+          Sent to {{ deliveries.0.recipients|length }} recipient(s) {{ deliveries.0.sent_at|date:"j M Y, H:i" }}
+          by {{ deliveries.0.sent_by_label }} — see Sent below.
+        {% elif live.notified_at %}
+          <b>Not delivered.</b> A notification was recorded {{ live.notified_at|date:"j M Y, H:i" }},
+          but there is no delivery record: nothing shows that this reached anyone at the client.
         {% else %}<b>Not sent yet.</b>{% endif %}
       {% else %}
         Nothing is published. Approving is an internal record; publishing is the

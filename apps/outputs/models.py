@@ -237,10 +237,11 @@ class ExpertReviewer(models.Model):
 class RecordNote(TenantScopedModel):
     """A correction or clarification attached to an output, after the fact.
 
-    Append-only, and never part of an export: the artifact a client received
-    (or, on 1 October, did not) stays exactly as it was, and the note travels
-    with the record in the operator app instead. Rewriting history to fix it is
-    the thing this exists to avoid.
+    Append-only. The stored output, its versions and its audit history stay
+    exactly as they were; rewriting history to fix it is the thing this exists
+    to avoid. Since 20 Oct every export of a corrected output opens with its
+    notes and a CORRECTED RECORD notice (Mark: "an app-only note will not
+    protect someone downloading the old file").
     """
 
     output = models.ForeignKey(Output, on_delete=models.CASCADE, related_name="record_notes")

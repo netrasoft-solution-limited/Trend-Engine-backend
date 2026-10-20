@@ -228,3 +228,30 @@ def test_record_notes_show_on_the_output_and_in_the_list(client, admin, real_cli
 
     assert "No client profile existed." in detail
     assert "record note" in listing
+
+
+
+def test_a_notification_without_a_delivery_is_not_called_sent(client, admin, real_client, approved):
+    """The 1 October page read "Sent to the client" from a notification
+    timestamp, with no delivery and nobody at the client receiving anything."""
+    from django.utils import timezone
+
+    from apps.outputs import services
+    from apps.publication import services as gate
+    from apps.publication.models import Publication
+
+    output = _brief(client, admin, real_client)
+    with scoped(real_client):
+        version = output.versions.get()
+        from apps.outputs.models import ExpertReviewer
+
+        ExpertReviewer.objects.create(name="Dr Jane Doe", qualification="RD", email="j@r.test")
+        services.record_expert_signoff(output, reviewer_label="Dr Jane Doe", actor_label="abu")
+        services.approve(version, actor_label="abu")
+        publication = gate.publish(version=version, organization=real_client, actor_label="abu")
+        Publication.objects.filter(pk=publication.pk).update(notified_at=timezone.now())
+
+    page = client.get(reverse("ops-output", args=[output.pk])).content.decode()
+
+    assert "Sent to the client" not in page
+    assert "Not delivered." in page and "there is no delivery record" in page
