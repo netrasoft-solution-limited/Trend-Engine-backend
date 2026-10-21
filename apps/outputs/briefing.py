@@ -177,8 +177,10 @@ def _window(sources: OrderedDict) -> tuple:
         if kind == "item":
             when = obj.published_at or obj.discovered_at
             dates.append(when.date() if hasattr(when, "date") else when)
-        else:
-            dates.append(obj.published_at or obj.observed_at)
+        elif obj.published_at:
+            # The day something was checked is not when anyone said it, so an
+            # undated product page or fact sheet never stretches the window.
+            dates.append(obj.published_at)
     dates = [d for d in dates if d]
     return (min(dates), max(dates)) if dates else (None, None)
 
@@ -437,12 +439,17 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
     return {
         "heading": "Coverage and method",
         "text": (
-            f"Collected automatically: {len(items)} podcast and video item(s) from "
-            f"{len(creators)} creator(s), transcribed and quoted with the moment each "
-            f"line was said. Paid sponsor segments are identified and excluded, and the "
-            f"same conversation published twice (a podcast and its video, or a clip) "
-            f"counts once.\n\n"
-            f"Entered by hand, with their links, dates and labels: {observed_line}. "
+            (
+                f"Collected automatically: {len(items)} podcast and video item(s) from "
+                f"{len(creators)} creator(s), transcribed and quoted with the moment each "
+                f"line was said. Paid sponsor segments are identified and excluded, and the "
+                f"same conversation published twice (a podcast and its video, or a clip) "
+                f"counts once.\n\n"
+                if items else
+                "No automatically collected item is cited in this brief: its stories were "
+                "started by an analyst from the examples below.\n\n"
+            )
+            + f"Entered by hand, with their links, dates and labels: {observed_line}. "
             f"These are targeted examples, not a representative sample. Figures keep "
             f"their kind: a search estimate is a rolling monthly average, Shop counts are "
             f"global lifetime totals, engagement is cumulative.\n\n"
@@ -462,7 +469,10 @@ def _sources(sources: OrderedDict) -> dict:
         else:
             note = "; ".join(p for p in [", ".join(obj.labels), obj.limitations.strip()] if p)
             lines.append(
-                f"· [{n}] {(obj.published_at or obj.observed_at):%-d %b %Y} — "
+                f"· [{n}] "
+                + (f"{obj.published_at:%-d %b %Y}" if obj.published_at
+                   else f"checked {obj.observed_at:%-d %b %Y}")
+                + " — "
                 + (f"[{_label(obj.title)}]({obj.url})" if obj.url
                    else f"{_label(obj.title)} (no public link; {obj.provenance})")
                 + f" — {obj.get_source_type_display()}"

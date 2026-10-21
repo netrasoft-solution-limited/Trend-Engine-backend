@@ -520,7 +520,10 @@ def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidenc
             excerpt="Shopper asks about magnesium glycinate", entered_by="abu",
         )
         for d in (1, 9)
-    ]
+    ] + [Observation.objects.create(
+        url="https://jarrow.com/products/x", title="Product page", source_type="catalogue",
+        observed_at=date(2026, 10, 20), entered_by="abu",
+    )]
     signal, _ = review.start_from_observations(
         title="Choosing a magnesium", statement="Shoppers ask which form to take.",
         observation_ids=[o.pk for o in found], actor_label="abu",
@@ -538,5 +541,11 @@ def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidenc
     story = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}["Choosing a magnesium"]
 
     assert "Status. Recurring discussion" in story
-    assert "an analyst-led story from 2 observation(s), 2 independent event(s)" in story
+    assert "an analyst-led story from 3 observation(s), 2 independent event(s)" in story
     assert "[1]" in story and "[2]" in story
+    sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
+    assert "No automatically collected item is cited" in sections["Coverage and method"]
+    assert "checked 20 Oct 2026 — [Product page]" in sections["Sources"]
+    assert "between 1 October and 9 October 2026" in sections["About this brief"], (
+        "a checked date does not stretch the window"
+    )
