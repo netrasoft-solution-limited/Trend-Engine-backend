@@ -177,9 +177,10 @@ def _window(sources: OrderedDict) -> tuple:
         if kind == "item":
             when = obj.published_at or obj.discovered_at
             dates.append(when.date() if hasattr(when, "date") else when)
-        elif obj.published_at:
+        elif obj.published_at and not obj.is_old_material:
             # The day something was checked is not when anyone said it, so an
-            # undated product page or fact sheet never stretches the window.
+            # undated product page or fact sheet never stretches the window, and
+            # older material is background, not part of it.
             dates.append(obj.published_at)
     dates = [d for d in dates if d]
     return (min(dates), max(dates)) if dates else (None, None)
@@ -188,7 +189,8 @@ def _window(sources: OrderedDict) -> tuple:
 def _about(organization, developments, sources) -> dict:
     start, end = _window(sources)
     span = (
-        f"between {start:%-d %B} and {end:%-d %B %Y}" if start and start != end
+        f"between {start:%-d %B}{f' {start.year}' if start.year != end.year else ''} and "
+        f"{end:%-d %B %Y}" if start and start != end
         else f"on {start:%-d %B %Y}" if start else "in the current window"
     )
     measured = any(d.signal.maturity == Signal.Maturity.MEASURED_TREND for d in developments)
@@ -480,8 +482,8 @@ def _sources(sources: OrderedDict) -> dict:
             )
     return {
         "heading": "Sources",
-        "text": "Links are clickable. Dates are publication dates where known, otherwise "
-        "the date observed.\n" + "\n".join(lines),
+        "text": "Links are clickable. Dates are publication dates where known; otherwise "
+        "the date the page was checked.\n" + "\n".join(lines),
     }
 
 

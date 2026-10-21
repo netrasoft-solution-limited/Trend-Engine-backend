@@ -78,9 +78,10 @@ def test_the_brief_has_the_delivered_sections_in_priority_order(jarrow):
     assert "must not be added together" in text["Search demand"]
     corroborated = text["What is corroborated across channels"]
     assert (
-        "| Spermidine | None found | 2 event(s); 1 paid, brand or older | None found | "
-        "1 event(s) |"
+        "| Spermidine | None found | 1 independent current event(s); 1 paid, brand or older | "
+        "None found | 1 estimate(s) |"
     ) in corroborated
+    assert "No candidate has independent, current evidence in every channel" in corroborated
     case = text["Candidate 1: Spermidine — test now"]
     assert "Labelled: advertisement." in case
     assert "4.6K items sold (global lifetime items sold)" in case
@@ -98,3 +99,28 @@ def test_every_source_is_numbered_and_cited(jarrow):
     case = text["Candidate 1: Spermidine — test now"]
     assert "[1]" in case and "[2]" in case
     assert "Start with a Spermidine customer concept test." in text["Executive summary"]
+
+
+def test_analyst_o_numbers_become_this_briefs_source_numbers(jarrow):
+    reddit = obs(url="https://reddit.com/a")
+    approved(jarrow, "Spermidine", [reddit],
+             why_it_matters=f"Shoppers ask for it (O{reddit.pk}, O999999).")
+
+    text = {s["heading"]: s["text"] for s in brief(jarrow).sections}
+    case = text["Candidate 1: Spermidine — test now"]
+
+    assert "Shoppers ask for it [1]." in case
+    assert f"O{reddit.pk}" not in case and "O999999" not in case
+
+
+def test_older_material_does_not_set_the_window(jarrow):
+    approved(jarrow, "Ergothioneine", [
+        obs(url="https://reddit.com/now", published_at=date(2026, 10, 5)),
+        obs(url="https://reddit.com/later", published_at=date(2026, 10, 12)),
+        obs(url="https://podcasts.example/old", source_type="podcast",
+            published_at=date(2025, 10, 1), is_old_material=True),
+    ])
+
+    about = {s["heading"]: s["text"] for s in brief(jarrow).sections}["About this brief"]
+
+    assert "Between 5 October and 12 October 2026" in about

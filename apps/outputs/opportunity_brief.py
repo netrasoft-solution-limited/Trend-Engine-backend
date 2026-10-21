@@ -10,13 +10,22 @@ counts and cumulative engagement each keep their own column or label.
 """
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 
 from apps.evidence.models import Observation
 from apps.scoring import opportunities
 from apps.scoring.models import Candidate
 
-from .briefing import Brief, _cell, _first_sentence, _sources, _window, observation_line
+from .briefing import (
+    Brief,
+    _cell,
+    _cite,
+    _first_sentence,
+    _sources,
+    _window,
+    observation_line,
+)
 from .services import DraftingError
 
 RESEARCH_NOTE = (
@@ -63,7 +72,7 @@ def sections_for(organization) -> Brief:
 
     sections = [
         _about(organization, candidates, sources, note),
-        _summary(organization, candidates, note),
+        _summary(organization, candidates, note, sources),
         *([demand] if demand else []),
         corroboration,
         *body,
@@ -71,6 +80,21 @@ def sections_for(organization) -> Brief:
         _sources(sources),
     ]
     return Brief(sections, ", ".join(sorted(profiles)), len(candidates))
+
+
+def _cited(text: str, candidate: Candidate, sources) -> str:
+    """The analyst's O-numbers become this brief's source numbers. A number the
+    candidate does not carry is dropped rather than shown."""
+    attached = {o.pk: o for o in candidate.observations.all()}
+
+    def swap(match):
+        o = attached.get(int(match.group(1)))
+        return f"[{_cite(sources, ('obs', o.pk), o)}]" if o else ""
+
+    text = re.sub(r"\(\s*(O\d+(?:\s*,\s*O\d+)*)\s*\)",
+                  lambda m: re.sub(r"\s*,\s*", " ", m.group(1)), text or "")
+    text = re.sub(r"\bO(\d+)\b", swap, text)
+    return re.sub(r"\s+([.,;])", r"\1", re.sub(r"[ \t]{2,}", " ", text)).strip()
 
 
 def _names(candidates) -> str:
@@ -88,7 +112,8 @@ def _about(organization, candidates, sources, note) -> dict:
         sources.setdefault(("obs", o.pk), o)
     start, end = _window(sources)
     span = (
-        f"Between {start:%-d %B} and {end:%-d %B %Y}" if start and start != end
+        f"Between {start:%-d %B}{f' {start.year}' if start.year != end.year else ''} and "
+        f"{end:%-d %B %Y}" if start and start != end
         else "This period"
     )
     return {
@@ -105,14 +130,15 @@ def _about(organization, candidates, sources, note) -> dict:
     }
 
 
-def _summary(organization, candidates, note) -> dict:
+def _summary(organization, candidates, note, sources) -> dict:
     lead = candidates[0]
     listings = _listings(candidates)
     absent = [c for c in candidates if c.gap_check and not c.gap_check.get("found")]
     lines = ["| # | Candidate | Status | Commercial opening | Recommended next step |"]
     for n, c in enumerate(candidates, start=1):
         lines.append(
-            f"| {n} | {_cell(c.name)} | {c.get_status_display()} | {_cell(c.opening)} | "
+            f"| {n} | {_cell(c.name)} | {c.get_status_display()} | "
+            f"{_cell(_cited(c.opening, c, sources))} | "
             f"{_cell(c.next_step)} |"
         )
     pending = [c.name for c in candidates if c.internal_check == Candidate.InternalCheck.PENDING]
@@ -135,7 +161,7 @@ def _summary(organization, candidates, note) -> dict:
         "heading": "Executive summary",
         "text": (
             f"Our recommendation. Start with {start}. "
-            f"{_first_sentence(lead.why_it_matters) or lead.opening}\n\n"
+            f"{_first_sentence(_cited(lead.why_it_matters, lead, sources)) or lead.opening}\n\n"
             f"{len(candidates)} candidate ingredient(s) reviewed · {len(absent)} of "
             f"{len(candidates)} not found in {listings} listings.\n\n"
             + "\n".join(lines)
@@ -154,7 +180,8 @@ def _figure(o: Observation) -> str:
 def _search_demand(candidates, sources) -> dict | None:
     rows, trends = [], []
     for c in candidates:
-        for o in c.observations.all():
+        ordered = sorted(c.observations.all(), key=lambda o: -(o.metric_value or 0))
+        for o in ordered:
             if o.metric_kind == Observation.MetricKind.SEARCH_ESTIMATE:
                 n = list(sources).index(("obs", o.pk)) + 1
                 rows.append(
@@ -181,31 +208,47 @@ def _search_demand(candidates, sources) -> dict | None:
 
 
 def _corroboration(candidates) -> dict:
+    """Channels with independent, current evidence. Paid, brand and older
+    material is shown but never makes a channel count as corroborated."""
     lines = ["| Candidate | " + " | ".join(CHANNELS) + " |"]
     complete = []
     for c in candidates:
-        cells = []
-        for types in CHANNELS.values():
+        cells, independent = [], []
+        for channel, types in CHANNELS.items():
             seen = [o for o in c.observations.all() if o.source_type in types]
-            events = len({o.independence_key for o in seen})
-            flagged = [o for o in seen if o.is_ad or o.is_brand_content or o.is_old_material]
-            cell = f"{events} event(s)" if events else "None found"
+            if channel == "Search":
+                estimates = sum(
+                    1 for o in seen if o.metric_kind == Observation.MetricKind.SEARCH_ESTIMATE
+                )
+                trends = any(o.metric_kind == Observation.MetricKind.TRENDS for o in seen)
+                cell = "; ".join(p for p in (
+                    f"{estimates} estimate(s)" if estimates else "",
+                    "Trends reading" if trends else "",
+                ) if p) or "None found"
+                cells.append(cell)
+                continue
+            clean = {o.independence_key for o in seen
+                     if not (o.is_ad or o.is_brand_content or o.is_old_material)}
+            flagged = len({o.independence_key for o in seen}) - len(clean)
+            parts = [f"{len(clean)} independent current event(s)" if clean else ""]
             if flagged:
-                cell += f"; {len(flagged)} paid, brand or older"
-            cells.append(cell)
-        if all(not cell.startswith("None") for cell in cells):
+                parts.append(f"{flagged} paid, brand or older")
+            cells.append("; ".join(p for p in parts if p) or "None found")
+            independent.append(bool(clean))
+        if all(independent):
             complete.append(c.name)
         lines.append(f"| {_cell(c.name)} | " + " | ".join(cells) + " |")
     closing = (
-        f"Evidence in every channel: {', '.join(complete)}."
-        if complete else "No candidate has evidence in every channel within this review."
+        f"Independent, current evidence in every channel: {', '.join(complete)}."
+        if complete else
+        "No candidate has independent, current evidence in every channel within this review."
     )
     return {
         "heading": "What is corroborated across channels",
         "text": "\n".join(lines) + "\n\n"
         "Counts are independent events: the same story told in a podcast and its video, or "
-        "two posts about one study, counts once. Paid, brand and older material is counted "
-        f"but named. {closing}",
+        "two posts about one study, counts once. Paid, brand and older material is shown but "
+        f"does not count as corroboration. Search is estimates, not events. {closing}",
     }
 
 
@@ -215,7 +258,9 @@ def _candidate(organization, n: int, c: Candidate, sources) -> dict:
         f" It would sit beside {', '.join(c.adjacent)} in the {organization.name} range."
         if c.adjacent else ""
     )
-    parts.append(f"The opportunity. {c.opening}{beside} {opportunities.gap_sentence(c)}")
+    parts.append(
+        f"The opportunity. {_cited(c.opening, c, sources)}{beside} {opportunities.gap_sentence(c)}"
+    )
     if c.internal_check != Candidate.InternalCheck.PENDING:
         parts[-1] += f" {c.get_internal_check_display()}."
     observations = sorted(c.observations.all(), key=lambda o: (o.published_at or o.observed_at))
@@ -228,13 +273,15 @@ def _candidate(organization, n: int, c: Candidate, sources) -> dict:
             )
         )
     if c.why_it_matters:
-        parts.append(f"Why it could matter to {organization.name}. {c.why_it_matters}")
+        parts.append(
+            f"Why it could matter to {organization.name}. {_cited(c.why_it_matters, c, sources)}"
+        )
     if c.test_plan:
-        parts.append(f"What to test next. {c.test_plan}")
+        parts.append(f"What to test next. {_cited(c.test_plan, c, sources)}")
     if c.gate:
-        parts.append(f"Gate. {c.gate}")
+        parts.append(f"Gate. {_cited(c.gate, c, sources)}")
     if c.limits:
-        parts.append(f"What this does not show. {c.limits}")
+        parts.append(f"What this does not show. {_cited(c.limits, c, sources)}")
     return {"heading": f"Candidate {n}: {c.name} — {c.get_status_display().lower()}",
             "text": "\n\n".join(parts)}
 
