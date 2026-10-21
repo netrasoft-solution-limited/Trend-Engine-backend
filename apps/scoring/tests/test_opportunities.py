@@ -219,3 +219,35 @@ def test_the_benchmark_screen_imports_and_summarises(client, operator, jarrow):
     assert b"2 of 3" in response.content
     with scoped(jarrow):
         assert BenchmarkAnswer.objects.filter(organization=jarrow).count() == 3
+
+
+def test_adjacent_listings_keep_names_that_contain_commas(catalogue):
+    candidate = create(catalogue, "Spermidine")
+    with scoped(catalogue):
+        ClientAsset.objects.create(
+            organization=catalogue, profile=ClientAsset.objects.first().profile,
+            name="NMN NAD+ Precursor, 300 mg", terms=["nmn"],
+        )
+        unknown = opportunities.set_adjacent(
+            candidate, "NMN NAD+ Precursor, 300 mg, MagMind, Not A Listing", actor_label="abu"
+        )
+
+    assert candidate.adjacent == ["NMN NAD+ Precursor, 300 mg", "MagMind"]
+    assert unknown == ["Not A Listing"]
+
+
+def test_changing_the_evidence_or_adjacent_listings_withdraws_approval(catalogue):
+    candidate = create(catalogue, "Spermidine")
+    with scoped(catalogue):
+        opportunities.attach(candidate, [observation().pk], actor_label="abu")
+        opportunities.edit(candidate, {"opening": "O.", "next_step": "N.", "gate": "G."},
+                           actor_label="abu")
+        opportunities.approve(candidate, actor_label="abu")
+        opportunities.set_adjacent(candidate, "MagMind", actor_label="abu")
+        candidate.refresh_from_db()
+        assert not candidate.is_approved
+
+        opportunities.approve(candidate, actor_label="abu")
+        opportunities.attach(candidate, [observation(url="https://x.test/2").pk], actor_label="abu")
+        candidate.refresh_from_db()
+        assert not candidate.is_approved

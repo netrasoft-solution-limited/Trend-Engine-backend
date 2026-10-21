@@ -142,21 +142,36 @@ def suggest_adjacent(candidate: Candidate, limit: int = 4) -> list[str]:
 
 
 def set_adjacent(candidate: Candidate, text: str, *, actor_label: str) -> list[str]:
-    """Keep only names that are listings in the live profile; return the rest."""
+    """Keep only names that are listings in the live profile; return the rest.
+
+    Listing names contain commas ("NMN NAD+ Precursor, 300 mg"), so known names
+    are found in the text first, longest first, and only what is left over is
+    split on separators.
+    """
     profile = client_services.current_for(candidate.organization)
-    known = {a.name.lower(): a.name for a in profile.assets.all()} if profile else {}
-    wanted = split_names(text)
-    candidate.adjacent = [known[n.lower()] for n in wanted if n.lower() in known]
-    candidate.save(update_fields=["adjacent", "updated_at"])
+    known = sorted(
+        (a.name for a in profile.assets.all()) if profile else [], key=len, reverse=True
+    )
+    rest, found = text or "", []
+    for name in known:
+        at = rest.lower().find(name.lower())
+        if at >= 0:
+            found.append((at, name))
+            rest = rest[:at] + " ; " + rest[at + len(name):]
+    candidate.adjacent = [name for _, name in sorted(found)]
+    _unapprove(candidate)
+    candidate.save(update_fields=["adjacent", "approved_at", "approved_by_label", "updated_at"])
     _audit(candidate.organization, actor_label, f"Set adjacent listings on {candidate.name}",
            {"candidate_id": candidate.pk, "adjacent": candidate.adjacent})
-    return [n for n in wanted if n.lower() not in known]
+    return [n for n in split_names(rest) if n.strip(" ;,")]
 
 
 def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[list, list]:
     found = list(Observation.objects.filter(pk__in=ids))
     candidate.observations.add(*found)
     attached = [o.pk for o in found]
+    if attached and _unapprove(candidate):
+        candidate.save(update_fields=["approved_at", "approved_by_label", "updated_at"])
     if attached:
         _audit(candidate.organization, actor_label,
                f"Attached {len(attached)} observation(s) to {candidate.name}",
@@ -166,8 +181,17 @@ def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[l
 
 def detach(candidate: Candidate, observation_id: int, *, actor_label: str) -> None:
     candidate.observations.remove(observation_id)
+    if _unapprove(candidate):
+        candidate.save(update_fields=["approved_at", "approved_by_label", "updated_at"])
     _audit(candidate.organization, actor_label, f"Detached O{observation_id} from {candidate.name}",
            {"candidate_id": candidate.pk, "observation_id": observation_id})
+
+
+def _unapprove(candidate: Candidate) -> bool:
+    """Anything the brief would print changed: the approval no longer covers it."""
+    was = candidate.is_approved
+    candidate.approved_at, candidate.approved_by_label = None, ""
+    return was
 
 
 def edit(candidate: Candidate, raw: dict, *, actor_label: str) -> Candidate:
