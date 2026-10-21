@@ -147,3 +147,15 @@ def test_triage_starts_a_development_and_opens_its_review(client, operator, jarr
     page = response.content.decode()
     assert "analyst-led" in page and "not detected by automatic collection" in page
     assert "recurring discussion" in page.lower()
+
+
+def test_a_product_page_is_a_reference_not_an_event(db):
+    talk = obs(date(2026, 10, 6))
+    page = obs(None, source_type="catalogue", url="https://jarrow.com/products/x",
+               observed_at=date(2026, 10, 20))
+
+    signal, _ = start([talk.pk, page.pk])
+
+    assert signal.maturity == Signal.Maturity.WATCH
+    assert signal.item_count == 1
+    assert signal.observations.count() == 2, "still attached, as a reference"

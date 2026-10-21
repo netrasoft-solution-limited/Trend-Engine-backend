@@ -564,7 +564,8 @@ def _source_line(item: ContentItem) -> str:
 def _strength(signal: Signal) -> str:
     if signal.origin == Signal.Origin.ANALYST:
         observed = [link.observation for link in signal.observations.filter(role="supports")]
-        events = len({o.independence_key for o in observed})
+        events = len({o.independence_key for o in observed
+                      if o.source_type not in ("catalogue", "research")})
         kinds = sorted({o.get_source_type_display() for o in observed})
         return (
             f"Evidence strength: an analyst-led story from {len(observed)} observation(s), "

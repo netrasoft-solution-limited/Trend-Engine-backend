@@ -178,6 +178,10 @@ def detach_observation(signal: Signal, observation_id: int, *, actor_label: str)
         )
 
 
+#: Observation source types that are reference material, not discussion.
+REFERENCE_TYPES = ("catalogue", "research")
+
+
 @transaction.atomic
 def start_from_observations(
     *, title: str, statement: str, observation_ids: list[int], actor_label: str
@@ -201,7 +205,10 @@ def start_from_observations(
     if not found:
         raise ReviewError("Start from at least one observation (by number, e.g. O12).")
 
-    events = {o.independence_key: o for o in found}
+    # Product pages and fact sheets are attached as references, not as people
+    # discussing something: they never count as events or set the week span.
+    discussion = [o for o in found if o.source_type not in REFERENCE_TYPES]
+    events = {o.independence_key: o for o in discussion}
     weeks = {
         (o.published_at or o.observed_at).isocalendar()[:2]
         for o in events.values() if (o.published_at or o.observed_at)
@@ -221,7 +228,7 @@ def start_from_observations(
         created_by_label=actor_label,
         item_count=len(events),
         creator_count=len(events),
-        source_count=len({o.source_type for o in found}),
+        source_count=len({o.source_type for o in discussion}),
     )
     attach_observations(
         signal, [o.pk for o in found], role=SignalEvidence.Role.SUPPORTS,
