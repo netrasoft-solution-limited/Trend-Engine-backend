@@ -44,7 +44,7 @@
           {% for o in observations %}
             <tr>
               <td class="muted"><a href="{% url 'ops-observation' o.pk %}">O{{ o.pk }}</a></td>
-              <td><a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:70 }}</a></td>
+              <td>{% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:70 }}</a>{% else %}{{ o.title|truncatechars:70 }} <span class="muted">(no public link)</span>{% endif %}</td>
               <td class="muted">{{ o.get_source_type_display }}</td>
               <td class="muted">{{ o.published_at|date:"j M Y"|default:"—" }}</td>
               <td>{% if o.metric_kind %}{{ o.metric_label|default:o.metric_value }}<div class="note" style="margin-top:2px">{{ o.get_metric_kind_display }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>

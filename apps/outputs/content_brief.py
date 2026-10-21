@@ -227,7 +227,7 @@ def sections_for(organization, recommendation: Recommendation, *, client=None):
                 ]
             ),
         },
-        *_package_sections(draft, faqs, products),
+        *_package_sections(draft, faqs, products, organization.name),
         {
             "heading": "Why this piece",
             "text": (
@@ -240,13 +240,14 @@ def sections_for(organization, recommendation: Recommendation, *, client=None):
 
 
 DRAFT_LABEL = (
-    "Draft for Jarrow Scientific Affairs review. Not published, and not medically or "
+    "Draft for {client} Scientific Affairs review. Not published, and not medically or "
     "legally approved."
 )
 
 
-def _package_sections(draft, faqs, products) -> list[dict]:
+def _package_sections(draft, faqs, products, client: str) -> list[dict]:
     """The rest of the package, each piece labelled as a draft for review."""
+    label = DRAFT_LABEL.format(client=client)
     out = []
     if draft.sab_specialty.strip():
         out.append({
@@ -256,12 +257,12 @@ def _package_sections(draft, faqs, products) -> list[dict]:
     if draft.article_draft.strip():
         out.append({
             "heading": f"Article draft: {draft.working_title.strip()}",
-            "text": f"{DRAFT_LABEL}\n\n{draft.article_draft.strip()}",
+            "text": f"{label}\n\n{draft.article_draft.strip()}",
         })
     if faqs:
         out.append({
             "heading": "Product-page FAQ drafts",
-            "text": f"{DRAFT_LABEL}\n\n" + "\n\n".join(
+            "text": f"{label}\n\n" + "\n\n".join(
                 f"{products[f.product.strip().lower()]}: {f.question.strip()}\n· {f.answer.strip()}"
                 for f in faqs
             ),

@@ -134,6 +134,7 @@ class OutputListView(View):
 
         title = (request.POST.get("title") or "").strip()
         summary = (request.POST.get("summary") or "").strip()
+        recommendation = None
         with scoped(organization):
             try:
                 if type_ == OutputType.CONTENT_BRIEF:
@@ -180,6 +181,7 @@ class OutputListView(View):
                     client_profile_version=profile,
                     domain_pack_version=DOMAIN_PACK_VERSION,
                     is_illustrative=bool(request.POST.get("is_illustrative")),
+                    recommendation=recommendation,
                 )
             except services.DraftingError as exc:
                 # Every refusal is already written for the operator: nothing

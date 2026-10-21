@@ -49,7 +49,7 @@
             <tr>
               <td class="muted"><a href="{% url 'ops-observation' o.pk %}">O{{ o.pk }}</a></td>
               <td>
-                <a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:80 }}</a>
+                {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:80 }}</a>{% else %}{{ o.title|truncatechars:80 }} <span class="muted">(no public link)</span>{% endif %}
                 <div class="note" style="margin-top:2px">{{ o.topic }}{% if o.event_key %} · event: {{ o.event_key }}{% endif %}{% if o.provenance %} · {{ o.provenance }}{% endif %}</div>
               </td>
               <td class="muted">{{ o.get_source_type_display }}</td>

@@ -78,6 +78,13 @@ class Output(TenantScopedModel):
     #: it came from. Always on for a fixture organisation.
     is_illustrative = models.BooleanField(default=False)
 
+    #: The approved recommendation a content package was drafted from, so the
+    #: portfolio brief can show its plan and the output can be regenerated.
+    recommendation = models.ForeignKey(
+        "scoring.Recommendation", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="outputs",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -151,6 +151,7 @@ def test_a_content_brief_is_drafted_from_its_recommendation(
     assert output.type == OutputType.CONTENT_BRIEF
     assert output.title == "Which magnesium, for which goal", "the working title by default"
     assert output.requires_expert_review, "content briefs still need expert sign-off to publish"
+    assert output.recommendation_id == approved.pk, "linked, so the brief can show its plan"
 
 
 def test_a_content_brief_without_a_recommendation_says_where_to_start(

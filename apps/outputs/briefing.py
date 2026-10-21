@@ -40,6 +40,7 @@ from apps.intelligence.models import Signal, SignalEvidence
 from apps.scoring import benchmark
 from apps.scoring.models import ClientSignalScore, Recommendation
 
+from .models import Output, OutputState, OutputType
 from .services import DraftingError
 
 #: Quotes per development in the brief. Enough to show it is several voices,
@@ -330,7 +331,59 @@ def _development(organization, development: Development, sources) -> dict:
     ai = benchmark.brief_lines(organization, rec.benchmark_questions)
     if ai:
         parts.append("What AI answers show today:\n" + "\n".join(f"· {line}" for line in ai))
+    parts.extend(_content_plan(rec))
     return {"heading": signal.title, "text": "\n\n".join(parts)}
+
+
+#: The content package's pieces, by section heading prefix, as the brief names them.
+PACKAGE_PIECES = (
+    ("Article draft", "an article"),
+    ("Product-page FAQ drafts", "product-page FAQs"),
+    ("Short video script", "a short video"),
+    ("Email draft", "an email"),
+    ("Social posts", "social posts"),
+    ("AI questions to win", "answers to the questions AI assistants are asked"),
+)
+
+
+def _content_plan(rec: Recommendation) -> list[str]:
+    """The story's content package, if one has been drafted: who should write
+    it, the plan, every way to use it, and the FAQ drafts. Says which version."""
+    output = (
+        Output.objects.filter(recommendation=rec, type=OutputType.CONTENT_BRIEF)
+        .order_by("-updated_at").first()
+    )
+    version = output.versions.order_by("-number").first() if output else None
+    if version is None:
+        return []
+    sections = {s["heading"].split(":")[0]: s["text"] for s in version.body}
+    title = re.search(r"Working title: (.+)", sections.get("The brief", ""))
+    state = (
+        "approved" if version.state in (OutputState.APPROVED, OutputState.PUBLISHED)
+        else "a draft, not yet approved"
+    )
+    parts = [
+        f"The content plan. From content package v{version.number} ({state})"
+        + (f": “{title.group(1).strip()}”." if title else ".")
+    ]
+    specialty = sections.get("Suggested Science Advisory Board specialty", "").strip()
+    if specialty:
+        parts.append(f"Suggested Science Advisory Board specialty. {specialty}")
+    outline = [
+        re.sub(r"\s*\((draws on [^)]*|needs a source before drafting)\)$", "", line)
+        for line in sections.get("Outline", "").splitlines() if line.strip()
+    ]
+    if outline:
+        parts.append("Article plan:\n" + "\n".join(outline))
+    pieces = [label for prefix, label in PACKAGE_PIECES if prefix in sections]
+    if pieces:
+        parts.append(
+            "All the ways to use it: " + ", ".join(pieces[:-1])
+            + (f" and {pieces[-1]}" if len(pieces) > 1 else pieces[0]) + "."
+        )
+    if "Product-page FAQ drafts" in sections:
+        parts.append(sections["Product-page FAQ drafts"])
+    return parts
 
 
 def _next_steps(developments: list[Development]) -> dict:
@@ -410,7 +463,9 @@ def _sources(sources: OrderedDict) -> dict:
             note = "; ".join(p for p in [", ".join(obj.labels), obj.limitations.strip()] if p)
             lines.append(
                 f"· [{n}] {(obj.published_at or obj.observed_at):%-d %b %Y} — "
-                f"[{_label(obj.title)}]({obj.url}) — {obj.get_source_type_display()}"
+                + (f"[{_label(obj.title)}]({obj.url})" if obj.url
+                   else f"{_label(obj.title)} (no public link; {obj.provenance})")
+                + f" — {obj.get_source_type_display()}"
                 + (f". {note}" if note else "")
             )
     return {
@@ -475,7 +530,8 @@ def observation_line(o, sources: OrderedDict | None = None) -> str:
     buyers — and every label travels with it.
     """
     title = _label(o.title)
-    parts = [f"[{title}]({o.url})", o.get_source_type_display()]
+    parts = [f"[{title}]({o.url})" if o.url else f"{title} (no public link; {o.provenance})",
+             o.get_source_type_display()]
     if o.published_at:
         parts.append(f"published {o.published_at:%-d %b %Y}")
     parts.append(f"observed {o.observed_at:%-d %b %Y}")

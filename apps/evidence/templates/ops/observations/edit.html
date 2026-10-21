@@ -6,7 +6,7 @@
     {% if obs %}· entered by {{ obs.entered_by }} {{ obs.entered_at|date:"j M Y" }}{% if obs.import_batch %} ({{ obs.import_batch }}){% endif %}{% endif %}</p>
   <form method="post" class="card">
     {% csrf_token %}
-    <label>Link (required)</label><input type="text" name="url" value="{{ draft.url|default:obs.url }}" required>
+    <label>Link (required unless provenance says where a figure with no public page came from)</label><input type="text" name="url" value="{{ draft.url|default:obs.url }}">
     <label>Title (required)</label><input type="text" name="title" value="{{ draft.title|default:obs.title }}" required>
     <label>Source type</label>
     <select name="source_type">{% for value, label in sources %}<option value="{{ value }}" {% if value == obs.source_type or value == draft.source_type %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>

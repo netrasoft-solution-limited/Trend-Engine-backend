@@ -60,11 +60,17 @@ def clean(raw: dict) -> dict:
     get = lambda key: str(raw.get(key) or "").strip()  # noqa: E731
 
     data: dict = {}
-    for key in ("url", "title"):
-        if not get(key):
-            raise ObservationError(f"'{key}' is required.")
-        data[key] = get(key)
-    if not data["url"].startswith(("http://", "https://")):
+    if not get("title"):
+        raise ObservationError("'title' is required.")
+    data["title"], data["url"] = get("title"), get("url")
+    if not data["url"] and not get("provenance"):
+        # A figure with no public page (third-party keyword data) is still
+        # traceable if it says where it came from.
+        raise ObservationError(
+            "'url' is required, unless 'provenance' says where a figure with no public "
+            "page came from."
+        )
+    if data["url"] and not data["url"].startswith(("http://", "https://")):
         raise ObservationError("'url' must be a full web address (http or https).")
 
     source = get("source_type").lower()

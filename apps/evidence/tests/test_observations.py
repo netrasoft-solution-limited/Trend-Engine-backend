@@ -92,3 +92,14 @@ def test_the_import_screen_is_all_or_nothing(client):
 
     assert "Nothing imported" in response.content.decode()
     assert not Observation.objects.exists()
+
+
+def test_a_figure_with_no_public_page_needs_its_provenance():
+    row = {**service.EXAMPLE, "url": "", "source_type": "search_estimate",
+           "metric_kind": "rolling_monthly_search_estimate", "metric_value": "14,800",
+           "query": "spermidine", "provider": "Keyword data", "geography": "US",
+           "period": "12-month average"}
+
+    with pytest.raises(service.ObservationError, match="unless 'provenance'"):
+        service.clean(row)
+    assert service.clean({**row, "provenance": "Pure Play opportunity brief [2]"})["url"] == ""

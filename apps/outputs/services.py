@@ -94,6 +94,7 @@ def draft(
     client_profile_version: str = "",
     domain_pack_version: str = "",
     is_illustrative: bool = False,
+    recommendation=None,
 ) -> OutputVersion:
     """A new version of an output, in DRAFT.
 
@@ -122,8 +123,12 @@ def draft(
             # A fixture organisation's outputs are never real findings, whatever
             # the caller passed.
             "is_illustrative": is_illustrative or organization.is_fixture,
+            "recommendation": recommendation,
         },
     )
+    if recommendation is not None and output.recommendation_id != recommendation.pk:
+        output.recommendation = recommendation
+        output.save(update_fields=["recommendation"])
 
     previous = output.versions.order_by("-number").first()
     version = OutputVersion.objects.create(

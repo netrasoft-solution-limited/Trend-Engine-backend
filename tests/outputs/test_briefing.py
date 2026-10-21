@@ -354,7 +354,7 @@ def test_the_content_package_carries_every_piece_labelled_as_a_draft(jarrow, app
 
     assert "draws on E1, E2" in body["Outline"], "the invented observation number is gone"
     assert "Which magnesium for sleep?" in body["Evidence to use"]
-    assert content_brief.DRAFT_LABEL in body["Article draft"]
+    assert content_brief.DRAFT_LABEL.format(client=jarrow.name) in body["Article draft"]
     assert "MagMind: How do they differ?" in body["Product-page FAQ drafts"]
     assert "Some Rival Product" not in body["Product-page FAQ drafts"]
     assert "Subject: Which magnesium?" in body["Email draft"]
@@ -451,3 +451,56 @@ def test_outline_numbers_hold_when_a_later_section_adds_a_claim(jarrow, approved
     assert "Open — Hook (draws on E1, E3)" in body["Outline"]
     assert "E3. " in body["Evidence to use"] and "reddit.com" in body["Evidence to use"]
     assert "[1]" not in body["Evidence to use"], "E-numbers only, no source numbers"
+
+
+def test_a_story_carries_its_content_plan_and_says_which_version(jarrow, approved):
+    from apps.outputs import services
+    from apps.outputs.models import OutputType
+
+    with scoped(jarrow):
+        services.draft(
+            jarrow, type=OutputType.CONTENT_BRIEF, title="Which magnesium?", actor_label="abu",
+            recommendation=approved,
+            sections=[
+                {"heading": "The brief", "text": "· Working title: Which magnesium for you?"},
+                {"heading": "Outline", "text": "· 1. Open — Hook (draws on E1, E2)"},
+                {"heading": "Suggested Science Advisory Board specialty",
+                 "text": "A registered dietitian."},
+                {"heading": "Short video script", "text": "Labels confuse."},
+                {"heading": "Product-page FAQ drafts",
+                 "text": "Draft label.\n\nMagMind: How do they differ?\n· Compare panels."},
+            ],
+        )
+
+    story = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}[
+        "Magnesium becomes a choice by goal"
+    ]
+
+    assert (
+        "From content package v1 (a draft, not yet approved): “Which magnesium for you?”"
+    ) in story
+    assert "Suggested Science Advisory Board specialty. A registered dietitian." in story
+    assert "Article plan:\n· 1. Open — Hook\n" in story, "package-local E-numbers dropped"
+    assert "All the ways to use it: product-page FAQs and a short video." in story
+    assert "MagMind: How do they differ?" in story
+
+
+def test_a_story_without_a_package_has_no_content_plan(jarrow, approved):
+    assert "The content plan" not in text_of(brief_for(jarrow))
+
+
+def test_an_observation_with_no_public_page_names_where_it_came_from(db):
+    from apps.evidence.models import Observation
+
+    o = Observation(
+        url="", title="spermidine", source_type="search_estimate",
+        observed_at=__import__("datetime").date(2026, 10, 20),
+        metric_kind="rolling_monthly_search_estimate", metric_value=14800, query="spermidine",
+        provider="Keyword data", geography="US", period="12-month average",
+        provenance="Pure Play opportunity brief [2]", entered_by="abu",
+    )
+
+    assert "spermidine (no public link; Pure Play opportunity brief [2])" in (
+        briefing.observation_line(o)
+    )
+    assert "](" not in briefing.observation_line(o)

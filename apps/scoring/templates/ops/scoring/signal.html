@@ -294,7 +294,7 @@ operator decide each of those.
           <tr>
             <td class="muted" style="width:56px">O{{ o.pk }}</td>
             <td>
-              <a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:90 }}</a>
+              {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:90 }}</a>{% else %}{{ o.title|truncatechars:90 }} <span class="muted">(no public link)</span>{% endif %}
               <div class="note" style="margin-top:2px">
                 {{ o.get_source_type_display }}{% if o.published_at %} · {{ o.published_at|date:"j M Y" }}{% endif %}
                 · observed {{ o.observed_at|date:"j M Y" }}

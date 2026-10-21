@@ -324,7 +324,9 @@ class Observation(models.Model):
     #: geography and period.
     SEARCH_KINDS = (MetricKind.SEARCH_ESTIMATE, MetricKind.TRENDS)
 
-    url = models.URLField(max_length=1000)
+    #: Blank only when the figure has no public page (third-party keyword data);
+    #: `provenance` must then say where it came from.
+    url = models.URLField(max_length=1000, blank=True)
     title = models.CharField(max_length=500)
     source_type = models.CharField(max_length=20, choices=SourceType.choices)
     #: When it was published, if known; when it was looked at, always.
