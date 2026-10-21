@@ -225,3 +225,23 @@ def test_the_page_shows_effective_weights_maturity_and_coverage(client, operator
     assert signal.get_maturity_display() in body
     assert "Counts towards a baseline" in body
     assert len(response.context["coverage"]) == 6
+
+
+
+def test_an_approval_can_be_withdrawn_with_a_reason_and_edited_again(
+    client, operator, jarrow, proposed
+):
+    client.force_login(operator)
+    post(client, jarrow, {"action": "rec.approve"})
+
+    refused = post(client, jarrow, {"action": "rec.withdraw", "note": ""})
+    assert "the reason is the record" in refused.content.decode()
+
+    post(client, jarrow, {"action": "rec.withdraw", "note": "A comfort claim slipped in."})
+    with scoped(jarrow):
+        proposed.refresh_from_db()
+    assert proposed.state == Recommendation.State.EDITED
+    assert proposed.decision_note == "A comfort claim slipped in."
+    from apps.operations.models import AuditEvent
+    with scoped(jarrow):
+        assert AuditEvent.objects.filter(message__startswith="Withdrew approval").exists()

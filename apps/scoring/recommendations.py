@@ -429,6 +429,32 @@ def decide(
     return recommendation
 
 
+@transaction.atomic
+def withdraw(recommendation: Recommendation, *, actor_label: str, note: str) -> Recommendation:
+    """Take back an approval so the recommendation can be edited and decided again.
+
+    For a fault found after approving. A brief already drafted keeps the text it
+    was built from — an output version is a snapshot — so withdrawing changes
+    only what the next brief uses.
+    """
+    if recommendation.state != Recommendation.State.APPROVED:
+        raise RecommendationError("Only an approved recommendation can be withdrawn.")
+    if not note.strip():
+        raise RecommendationError("Say why the approval is withdrawn — the reason is the record.")
+    recommendation.state = Recommendation.State.EDITED
+    recommendation.decision_note = note.strip()
+    recommendation.save(update_fields=["state", "decision_note", "updated_at"])
+    _audit(
+        recommendation.organization,
+        actor_label,
+        f"Withdrew approval of the recommendation on {recommendation.signal.code}",
+        {"recommendation_id": recommendation.pk, "note": note.strip(),
+         "approved_by": recommendation.decided_by_label},
+        kind=AuditEvent.Kind.REVIEW,
+    )
+    return recommendation
+
+
 def _audit(
     organization, actor_label: str, message: str, context: dict, *, kind: str = ""
 ) -> None:

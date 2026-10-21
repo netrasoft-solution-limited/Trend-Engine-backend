@@ -382,6 +382,11 @@ class SignalReviewView(View):
                 {"recommendation_id": current.pk, "questions": current.benchmark_questions},
             )
             messages.success(request, f"{len(current.benchmark_questions)} question(s) tied.")
+        elif action == "rec.withdraw":
+            recommendations.withdraw(
+                current, actor_label=actor, note=request.POST.get("note") or ""
+            )
+            messages.info(request, "Approval withdrawn. Edit it, then approve again.")
         elif action == "rec.approve":
             recommendations.decide(current, approve=True, actor_label=actor)
             messages.success(request, "Approved. It can now go into a brief for this client.")

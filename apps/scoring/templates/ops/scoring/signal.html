@@ -254,6 +254,12 @@ operator decide each of those.
           </form>
         </div>
         <p class="note">Approving is not sending. It makes this available to a brief, which still goes through approval and the publication gate.</p>
+      {% elif recommendation.state == "approved" %}
+        <form method="post" class="inline" style="margin-top:12px">{% csrf_token %}
+          <input type="text" name="note" placeholder="Why withdraw the approval?" style="width:260px">
+          <button type="submit" name="action" value="rec.withdraw" class="small secondary">Withdraw approval</button>
+          <span class="note" style="margin:0">Briefs already drafted keep their text; the next one uses the corrected version.</span>
+        </form>
       {% endif %}
     {% endif %}
 
