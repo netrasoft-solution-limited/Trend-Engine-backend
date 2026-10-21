@@ -27,8 +27,12 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     @top-left { content: string(running); font: 7.5pt "DejaVu Sans", Helvetica, sans-serif; color: #6b6864; }
     @bottom-left { content: string(footer); font: 7.5pt "DejaVu Sans", Helvetica, sans-serif; color: #6b6864; }
   }
-  .running { string-set: running content(); display: none; }
-  .footer-text { string-set: footer content(); display: none; }
+  /* Carries the running header and footer into @page. Not display:none —
+     WeasyPrint ignores string-set on elements that generate no box — so they
+     are rendered at zero size instead. */
+  .running { string-set: running content(); }
+  .footer-text { string-set: footer content(); }
+  .running, .footer-text { font-size: 0; line-height: 0; height: 0; overflow: hidden; margin: 0; }
   .brand {
     font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
     font-size: 8.5pt; font-weight: bold; letter-spacing: .14em;
@@ -97,8 +101,8 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
 <body>
   {% if document.brand %}
     <div class="brand">{{ document.brand|upper }}</div>
-    <span class="running">{{ document.running_header }}</span>
-    <span class="footer-text">{{ document.running_footer }}</span>
+    <div class="running">{{ document.running_header }}</div>
+    <div class="footer-text">{{ document.running_footer }}</div>
   {% endif %}
   {% if document.has_notice %}<div class="notice">{{ document.notice }}</div>{% endif %}
 
