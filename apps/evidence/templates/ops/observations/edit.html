@@ -1,0 +1,44 @@
+{% extends "ops/base.html" %}
+{% block title %}{% if obs %}Observation O{{ obs.pk }}{% else %}New observation{% endif %}{% endblock %}
+{% block content %}
+  <h1>{% if obs %}Observation O{{ obs.pk }}{% else %}New observation{% endif %}</h1>
+  <p class="lede"><a href="{% url 'ops-observations' %}">← Observations</a>
+    {% if obs %}· entered by {{ obs.entered_by }} {{ obs.entered_at|date:"j M Y" }}{% if obs.import_batch %} ({{ obs.import_batch }}){% endif %}{% endif %}</p>
+  <form method="post" class="card">
+    {% csrf_token %}
+    <label>Link (required)</label><input type="text" name="url" value="{{ draft.url|default:obs.url }}" required>
+    <label>Title (required)</label><input type="text" name="title" value="{{ draft.title|default:obs.title }}" required>
+    <label>Source type</label>
+    <select name="source_type">{% for value, label in sources %}<option value="{{ value }}" {% if value == obs.source_type or value == draft.source_type %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <div class="grid2">
+      <div><label>Published (YYYY-MM-DD)</label><input type="text" name="published_at" value="{{ draft.published_at|default:obs.published_at|date:'Y-m-d' }}"></div>
+      <div><label>Observed (required)</label><input type="text" name="observed_at" value="{{ draft.observed_at|default:obs.observed_at|date:'Y-m-d' }}" required></div>
+    </div>
+    <label>Topic</label><input type="text" name="topic" value="{{ draft.topic|default:obs.topic }}">
+    <label>What it says</label><textarea name="excerpt">{{ draft.excerpt|default:obs.excerpt }}</textarea>
+    <label>Figure, if any</label>
+    <div class="grid2">
+      <select name="metric_kind">{% for value, label in kinds %}<option value="{{ value }}" {% if value == obs.metric_kind or value == draft.metric_kind %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <input type="text" name="metric_value" placeholder="number" value="{{ draft.metric_value|default:obs.metric_value|default_if_none:'' }}">
+    </div>
+    <input type="text" name="metric_label" placeholder="As it should read, e.g. 4.6K items sold" value="{{ draft.metric_label|default:obs.metric_label }}" style="margin-top:6px">
+    <p class="note">For a search figure: query, provider, geography and period are required.</p>
+    <div class="grid2">
+      <input type="text" name="query" placeholder="query" value="{{ draft.query|default:obs.query }}">
+      <input type="text" name="provider" placeholder="provider" value="{{ draft.provider|default:obs.provider }}">
+      <input type="text" name="geography" placeholder="geography" value="{{ draft.geography|default:obs.geography }}">
+      <input type="text" name="period" placeholder="period" value="{{ draft.period|default:obs.period }}">
+    </div>
+    <label>Labels</label>
+    <label class="check"><input type="checkbox" name="is_ad" {% if obs.is_ad %}checked{% endif %}> Advertisement or sponsored</label>
+    <label class="check"><input type="checkbox" name="is_brand_content" {% if obs.is_brand_content %}checked{% endif %}> Brand content or brand interview</label>
+    <label class="check"><input type="checkbox" name="is_old_material" {% if obs.is_old_material %}checked{% endif %}> Older material (outside the window)</label>
+    <label class="check"><input type="checkbox" name="coverage_gap" {% if obs.coverage_gap %}checked{% endif %}> Missing coverage (e.g. no audience geography)</label>
+    <label>Limitations</label><textarea name="limitations">{{ draft.limitations|default:obs.limitations }}</textarea>
+    <label>Event key — the same value on observations that are one event (same interview in audio and video, same study)</label>
+    <input type="text" name="event_key" value="{{ draft.event_key|default:obs.event_key }}">
+    <label>Provenance — where this entry came from, if transcribed from other research</label>
+    <input type="text" name="provenance" value="{{ draft.provenance|default:obs.provenance }}">
+    <div class="actions"><button type="submit">Save</button></div>
+  </form>
+{% endblock %}

@@ -217,6 +217,7 @@ def load_spec(
             terms=terms or [name.lower()],
             weight=_clamp(row.get("weight", 50)),
             notes=str(row.get("notes") or ""),
+            family=str(row.get("family") or "").strip()[:120],
         )
 
     for key, facet in SPEC_FACETS.items():
@@ -276,6 +277,7 @@ def spec_from_csv(text: str) -> dict:
             continue
         notes = " · ".join(part for part in (cell(row, "url"), cell(row, "notes")) if part)
         entry = {
+            **({"family": cell(row, "family")} if cell(row, "family") else {}),
             "name": name,
             "terms": [t.strip() for t in re.split(r"[;|]", cell(row, "terms")) if t.strip()],
             "weight": cell(row, "weight") or 50,
@@ -326,6 +328,7 @@ def to_spec(version) -> dict:
                 "weight": asset.weight,
                 "terms": list(asset.terms),
                 **({"notes": asset.notes} if asset.notes else {}),
+                **({"family": asset.family} if asset.family else {}),
             }
             for asset in version.assets.all()
         ],

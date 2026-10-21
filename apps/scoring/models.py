@@ -230,6 +230,9 @@ class Recommendation(TenantScopedModel):
     decided_by_label = models.CharField(max_length=200, blank=True)
     decided_at = models.DateTimeField(null=True, blank=True)
     decision_note = models.TextField(blank=True)
+    #: The benchmark questions an operator tied to this recommendation; the
+    #: brief reports what AI answers show for them today.
+    benchmark_questions = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("organization", "-created_at")
@@ -246,3 +249,125 @@ class Recommendation(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"Recommendation on {self.signal_id} @ {self.organization_id} ({self.state})"
+
+
+class Candidate(TenantScopedModel):
+    """An ingredient or product a client does not sell, assessed for a test.
+
+    Mark's New Product Opportunity Brief (20 Oct) is built from these: a gap
+    check against the live catalogue, the observations behind the opening, and
+    a commercial next step with the gate it must pass. The ranking is the
+    analyst's commercial judgement, so `priority` is set by hand, never computed.
+
+    Nothing here is a launch recommendation, and nothing reaches a client
+    until the candidate is approved and a brief built from it passes the gate.
+    """
+
+    class Status(models.TextChoices):
+        CANDIDATE = "candidate", "Under review"
+        TEST = "test", "Test now"
+        INVESTIGATE = "investigate", "Investigate next"
+        MONITOR = "monitor", "Keep on watch"
+        REJECTED = "rejected", "Not pursued"
+
+    class TestType(models.TextChoices):
+        NONE = "", "Not chosen"
+        CUSTOMER = "customer", "Customer concept test"
+        SUPPLIER = "supplier", "Supplier and evidence check"
+        PRICE = "price", "Price and margin test"
+        MONITOR = "monitor", "Monitor for stronger signals"
+
+    class InternalCheck(models.TextChoices):
+        PENDING = "pending", "Awaiting client confirmation"
+        ABSENT = "absent", "Client confirms not in range or pipeline"
+        PRESENT = "present", "Client says already in range or pipeline"
+
+    name = models.CharField(max_length=120)
+    #: Other names the ingredient is sold under; the gap check searches all.
+    aliases = models.JSONField(default=list, blank=True)
+    #: Words that place it in the range ("healthy aging"), used to suggest
+    #: adjacent listings.
+    theme = models.CharField(max_length=200, blank=True)
+    #: 1 is first. Set by the analyst: commercial judgement, not a score.
+    priority = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.CANDIDATE)
+
+    #: {"checked_at", "profile", "listings", "found": [{"name", "family", "field", "term"}]}
+    gap_check = models.JSONField(default=dict, blank=True)
+    internal_check = models.CharField(
+        max_length=20, choices=InternalCheck.choices, default=InternalCheck.PENDING
+    )
+    internal_note = models.TextField(blank=True)
+    #: Listing names in the profile this would sit beside.
+    adjacent = models.JSONField(default=list, blank=True)
+    observations = models.ManyToManyField(
+        "evidence.Observation", blank=True, related_name="candidates"
+    )
+
+    opening = models.TextField(blank=True)
+    why_it_matters = models.TextField(blank=True)
+    test_type = models.CharField(
+        max_length=20, choices=TestType.choices, default=TestType.NONE, blank=True
+    )
+    test_plan = models.TextField(blank=True)
+    next_step = models.CharField(max_length=300, blank=True)
+    gate = models.TextField(blank=True)
+    limits = models.TextField(blank=True)
+
+    model_run = models.ForeignKey(
+        "enrichment.ModelRun", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="candidates",
+    )
+    created_by_label = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    approved_by_label = models.CharField(max_length=200, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("organization", "priority", "name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "name"], name="uniq_candidate_name_per_org"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} @ {self.organization_id} ({self.status})"
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approved_at is not None
+
+    @property
+    def names(self) -> list[str]:
+        return [self.name, *(a for a in self.aliases if a.strip())]
+
+
+class BenchmarkAnswer(TenantScopedModel):
+    """One AI assistant's answer to one shopper question, as imported.
+
+    Mark's existing AI Brand Test is the source; nothing here queries an
+    assistant. One row per answer, so share-of-mention is counted, not
+    estimated, and every figure in a brief traces to the rows behind it.
+    """
+
+    run_date = models.DateField()
+    question = models.TextField()
+    assistant = models.CharField(max_length=60)
+    model = models.CharField(max_length=120, blank=True)
+    #: Brands named in the answer, in the order they appear.
+    brands = models.JSONField(default=list, blank=True)
+    client_named = models.BooleanField(default=False)
+    #: 1-based position of the client among `brands`; null when not named.
+    position = models.PositiveSmallIntegerField(null=True, blank=True)
+    excerpt = models.TextField(blank=True)
+    import_batch = models.CharField(max_length=64, blank=True)
+    entered_by = models.CharField(max_length=200, blank=True)
+    entered_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("organization", "-run_date", "question", "assistant")
+
+    def __str__(self) -> str:
+        return f"{self.assistant} on {self.run_date}: {self.question[:40]}"

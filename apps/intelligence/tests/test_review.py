@@ -98,3 +98,21 @@ def test_a_signal_cannot_be_merged_into_itself_or_into_a_rejected_one():
         review.merge(s, s, actor_label="abu")
     with pytest.raises(review.ReviewError, match="reopen it"):
         review.merge(s, rejected, actor_label="abu")
+
+
+def test_observations_attach_by_number_and_are_audited():
+    from apps.evidence.models import Observation
+
+    s = signal()
+    o = Observation.objects.create(
+        url="https://www.reddit.com/r/PCOS/x", title="Protein powder bloating",
+        source_type="reddit", observed_at="2026-10-20", entered_by="abu",
+    )
+
+    attached, missing = review.attach_observations(
+        s, review.parse_observation_ids(f"O{o.pk}, O999999"), role="supports", actor_label="abu"
+    )
+
+    assert attached == [o.pk] and missing == [999999]
+    assert s.observations.get().added_by == "abu"
+    assert AuditEvent.objects.filter(message__contains="attached observation").exists()

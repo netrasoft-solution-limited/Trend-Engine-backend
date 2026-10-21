@@ -274,3 +274,115 @@ class ContentSegment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.content_item_id}#{self.ordinal}"
+
+
+class Observation(models.Model):
+    """One piece of evidence entered by hand: a post, a listing, a search figure.
+
+    The traceable route for what is not collected automatically — Reddit,
+    Instagram, TikTok Shop, keyword estimates, Google Trends — agreed with Pure
+    Play on 21 Oct 2026. No paid access is assumed.
+
+    Mark's rules, enforced here rather than remembered:
+
+    - Every observation has its URL, its date, and its source type.
+    - A figure says what KIND of figure it is. A rolling monthly search
+      estimate, Google Trends relative interest, cumulative engagement and
+      lifetime Shop sales measure different things and are never added,
+      compared as like for like, or read as recent growth.
+    - A search figure says its query, provider, geography and period.
+    - Ads, brand content, old material and missing coverage are labelled.
+    - `event_key` marks observations that are one underlying event — the same
+      interview in audio and video, or repeated coverage of one study — so
+      they count once towards independent corroboration.
+    """
+
+    class SourceType(models.TextChoices):
+        REDDIT = "reddit", "Reddit / community"
+        INSTAGRAM = "instagram", "Instagram"
+        TIKTOK_SHOP = "tiktok_shop", "TikTok Shop"
+        TIKTOK = "tiktok", "TikTok"
+        YOUTUBE = "youtube", "YouTube"
+        PODCAST = "podcast", "Podcast"
+        WEB = "web", "Web page or article"
+        RESEARCH = "research", "Research paper or registry"
+        SEARCH_ESTIMATE = "search_estimate", "Search volume estimate"
+        GOOGLE_TRENDS = "google_trends", "Google Trends"
+        CATALOGUE = "catalogue", "Product or catalogue page"
+        OTHER = "other", "Other"
+
+    class MetricKind(models.TextChoices):
+        NONE = "", "No figure"
+        SEARCH_ESTIMATE = "rolling_monthly_search_estimate", "Rolling monthly search estimate"
+        TRENDS = "trends_relative_interest", "Google Trends relative interest"
+        ENGAGEMENT = "cumulative_engagement", "Cumulative engagement at observation"
+        SHOP_SALES = "lifetime_shop_sales", "Global lifetime items sold"
+        VIEWS = "cumulative_views", "Cumulative views at observation"
+        OTHER = "other", "Other figure (say what in the label)"
+
+    #: The kinds whose figure is meaningless without query, provider,
+    #: geography and period.
+    SEARCH_KINDS = (MetricKind.SEARCH_ESTIMATE, MetricKind.TRENDS)
+
+    url = models.URLField(max_length=1000)
+    title = models.CharField(max_length=500)
+    source_type = models.CharField(max_length=20, choices=SourceType.choices)
+    #: When it was published, if known; when it was looked at, always.
+    published_at = models.DateField(null=True, blank=True)
+    observed_at = models.DateField()
+    #: What it is about, in plain words — "protein and digestion",
+    #: "spermidine". The link to signals and candidates is explicit; this is for
+    #: finding it.
+    topic = models.CharField(max_length=200, blank=True, db_index=True)
+    excerpt = models.TextField(blank=True, help_text="What it says, quoted or summarised.")
+
+    metric_kind = models.CharField(
+        max_length=40, choices=MetricKind.choices, blank=True, default=""
+    )
+    metric_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    metric_label = models.CharField(
+        max_length=200, blank=True, help_text="e.g. '4.6K items sold, 383 reviews'"
+    )
+    query = models.CharField(max_length=300, blank=True)
+    provider = models.CharField(max_length=200, blank=True)
+    geography = models.CharField(max_length=100, blank=True)
+    period = models.CharField(max_length=100, blank=True)
+
+    is_ad = models.BooleanField(default=False)
+    is_brand_content = models.BooleanField(default=False)
+    is_old_material = models.BooleanField(default=False)
+    coverage_gap = models.BooleanField(default=False)
+    limitations = models.TextField(blank=True)
+
+    #: Same underlying event → same key → counted once. Blank means its own event.
+    event_key = models.CharField(max_length=200, blank=True, db_index=True)
+
+    entered_by = models.CharField(max_length=200)
+    entered_at = models.DateTimeField(auto_now_add=True)
+    import_batch = models.CharField(max_length=100, blank=True)
+    #: Where the entry came from, when it is a transcription of someone else's
+    #: research — e.g. "Pure Play Portfolio Trend Brief, Oct 2026, source [2]".
+    provenance = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        ordering = ("-observed_at", "-pk")
+
+    def __str__(self) -> str:
+        return f"{self.get_source_type_display()}: {self.title[:60]}"
+
+    @property
+    def independence_key(self) -> str:
+        return self.event_key.strip().lower() or f"observation-{self.pk}"
+
+    @property
+    def labels(self) -> list[str]:
+        out = []
+        if self.is_ad:
+            out.append("advertisement")
+        if self.is_brand_content:
+            out.append("brand content")
+        if self.is_old_material:
+            out.append("older material")
+        if self.coverage_gap:
+            out.append("missing coverage")
+        return out

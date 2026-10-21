@@ -68,7 +68,9 @@ def _actor(request) -> str:
 #: real states in the model and appear in the form, disabled and marked, rather
 #: than producing a trend brief under another type's name — which is what the
 #: form used to do, and why the type list said nothing about what was built.
-GENERATED_TYPES = frozenset({OutputType.TREND_BRIEF, OutputType.CONTENT_BRIEF})
+GENERATED_TYPES = frozenset(
+    {OutputType.TREND_BRIEF, OutputType.CONTENT_BRIEF, OutputType.PRODUCT_MEMO}
+)
 
 
 class OutputListView(View):
@@ -116,8 +118,8 @@ class OutputListView(View):
             label = dict(OutputType.choices).get(type_, type_)
             messages.error(
                 request,
-                f"{label} cannot be drafted yet — only the trend brief and the content "
-                f"brief have generators.",
+                f"{label} cannot be drafted yet — only the trend brief, the content "
+                f"brief and the opportunity brief have generators.",
             )
             return back
 
@@ -127,7 +129,7 @@ class OutputListView(View):
             messages.error(request, "Choose a client.")
             return back
 
-        from apps.outputs import briefing, content_brief
+        from apps.outputs import briefing, content_brief, opportunity_brief
         from apps.scoring.models import Recommendation
 
         title = (request.POST.get("title") or "").strip()
@@ -148,6 +150,16 @@ class OutputListView(View):
                     )
                     title = title or working_title
                     summary = summary or f"Content brief for {recommendation.signal.code}."
+                elif type_ == OutputType.PRODUCT_MEMO:
+                    brief = opportunity_brief.sections_for(organization)
+                    sections, profile = brief.sections, brief.profile
+                    title = title or (
+                        f"{organization.name} — new product opportunity brief, "
+                        f"{timezone.now():%B %Y}"
+                    )
+                    summary = summary or (
+                        f"{brief.developments} approved candidate(s), in priority order."
+                    )
                 else:
                     brief = briefing.sections_for_brief(organization)
                     sections, profile = brief.sections, brief.profile

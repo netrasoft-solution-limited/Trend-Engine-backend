@@ -121,3 +121,58 @@ def _audit(actor_label: str, message: str, context: dict) -> None:
         message=message,
         context=context,
     )
+
+
+# ── Hand-entered evidence ───────────────────────────────────────────────────
+
+
+def parse_observation_ids(text: str) -> list[int]:
+    """'O12, O15 17' → [12, 15, 17]."""
+    import re
+
+    return [int(n) for n in re.findall(r"\d+", text or "")]
+
+
+@transaction.atomic
+def attach_observations(
+    signal: Signal, ids: list[int], *, role: str, actor_label: str
+) -> tuple[list[int], list[int]]:
+    """Attach observations by number. Returns (attached, not found)."""
+    from apps.evidence.models import Observation
+
+    from .models import SignalObservation
+
+    if role not in SignalEvidence.Role.values:
+        raise ReviewError("Choose whether the observations support or contradict it.")
+    found = {o.pk: o for o in Observation.objects.filter(pk__in=ids)}
+    attached = []
+    for pk in ids:
+        if pk in found:
+            _, created = SignalObservation.objects.get_or_create(
+                signal=signal, observation=found[pk],
+                defaults={"role": role, "added_by": actor_label},
+            )
+            if created:
+                attached.append(pk)
+    if attached:
+        _audit(
+            actor_label,
+            f"{signal.code}: attached observation(s) {', '.join(f'O{i}' for i in attached)}",
+            {"signal": signal.code, "observations": attached, "role": role},
+        )
+    return attached, [pk for pk in ids if pk not in found]
+
+
+@transaction.atomic
+def detach_observation(signal: Signal, observation_id: int, *, actor_label: str) -> None:
+    from .models import SignalObservation
+
+    deleted, _ = SignalObservation.objects.filter(
+        signal=signal, observation_id=observation_id
+    ).delete()
+    if deleted:
+        _audit(
+            actor_label,
+            f"{signal.code}: detached observation O{observation_id}",
+            {"signal": signal.code, "observation": observation_id},
+        )

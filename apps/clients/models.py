@@ -122,6 +122,10 @@ class ClientAsset(TenantScopedModel):
     #: and the operator is the only one who knows which is which.
     weight = models.PositiveSmallIntegerField(default=50)
     notes = models.TextField(blank=True)
+    #: The listening family a listing belongs to — "Digestion and protein",
+    #: "Bone health" — from the catalogue inventory. The portfolio brief maps
+    #: every listing to one family, as the delivered October brief does.
+    family = models.CharField(max_length=120, blank=True, db_index=True)
 
     class Meta:
         ordering = ("organization", "-weight", "name")

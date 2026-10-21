@@ -34,6 +34,8 @@ urlpatterns = [
     # the lowest layer that may read runs, items and claims together.
     path("", include("apps.enrichment.urls")),         # Ingestion runs · items
     path("resolution/", include("apps.evidence.urls")),  # Resolution queue
+    # Hand-entered evidence: Reddit, social, Shop, search (traceable imports).
+    path("observations/", include("apps.evidence.urls_observations")),
     path("client/", include("apps.clients.urls")),     # Client profile
     # The output builder lives in `publication`: its screens drive the gate,
     # and the gate is a layer above `outputs`.

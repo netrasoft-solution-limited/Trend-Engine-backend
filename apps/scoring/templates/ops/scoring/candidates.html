@@ -1,0 +1,63 @@
+{% extends "ops/base.html" %}
+{% block title %}Candidates · {{ organization.name }}{% endblock %}
+{% block content %}
+  <h1>New-product candidates</h1>
+  <p class="lede">
+    Ingredients <b>{{ organization.name }}</b> may not sell, assessed for a commercial test.
+    Each is checked against the live catalogue{% if profile %} ({{ profile.citation }}){% endif %},
+    given traceable observations, and approved with an opening, a next step and a gate.
+    The order is the analyst's commercial judgement, not a market-size ranking.
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Opportunity brief</span>
+      <span class="state">{{ approved }} candidate(s) approved</span>
+    </div>
+    {% if approved %}
+      <form method="post" action="{% url 'ops-outputs' %}" style="margin-top:8px">{% csrf_token %}
+        <input type="hidden" name="organization" value="{{ organization.slug }}">
+        <input type="hidden" name="type" value="product_memo">
+        <button type="submit">Draft the opportunity brief from {{ approved }} candidate(s)</button>
+      </form>
+    {% else %}
+      <p class="note">Approve at least one candidate to draft the brief.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">#</th><th>Candidate</th><th>Status</th><th>Catalogue</th><th class="num">Observations</th><th>Approved</th></tr></thead>
+        <tbody>
+          {% for c in candidates %}
+            <tr>
+              <td class="num">{{ c.priority }}</td>
+              <td><a href="{% url 'ops-candidate' organization.slug c.pk %}">{{ c.name }}</a>{% if c.aliases %}<div class="note" style="margin-top:2px">{{ c.aliases|join:", " }}</div>{% endif %}</td>
+              <td>{{ c.get_status_display }}</td>
+              <td class="muted">{% if c.gap_check %}{% if c.gap_check.found %}found in {{ c.gap_check.found|length }}{% else %}not in {{ c.gap_check.listings }} listings{% endif %}{% else %}not checked{% endif %} · {{ c.get_internal_check_display|lower }}</td>
+              <td class="num">{{ c.observations.all|length }}</td>
+              <td>{% if c.is_approved %}<span class="pill live">approved</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="empty">No candidates yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="name">Add a candidate</span>
+    <form method="post">
+      {% csrf_token %}
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required placeholder="Spermidine">
+      <label for="aliases">Other names it is sold under (comma separated)</label>
+      <input type="text" id="aliases" name="aliases" placeholder="wheat germ extract">
+      <label for="theme">Where it would sit in the range (used to suggest adjacent listings)</label>
+      <input type="text" id="theme" name="theme" placeholder="healthy aging, NAD">
+      <div class="actions"><button type="submit">Add and check the catalogue</button></div>
+    </form>
+  </div>
+{% endblock %}

@@ -152,6 +152,7 @@ def spec_from_inventory(text: str) -> tuple[dict, list[dict]]:
         ] if part)
         assets.append({
             "name": product,
+            "family": family,
             "kind": "product",
             "weight": NEUTRAL_WEIGHT,
             "terms": terms,
@@ -161,6 +162,7 @@ def spec_from_inventory(text: str) -> tuple[dict, list[dict]]:
         if family and family not in families:
             families[family] = {
                 "name": family,
+                "family": family,
                 "kind": "category",
                 "weight": NEUTRAL_WEIGHT,
                 "terms": [
@@ -186,6 +188,7 @@ def spec_from_inventory(text: str) -> tuple[dict, list[dict]]:
                 "weight": r["weight"],
                 "terms": r["terms"],
                 "notes": " · ".join(p for p in (r["url"], r["notes"]) if p),
+                "family": r["family"],
             }
             for r in rows
         ],
@@ -200,9 +203,10 @@ def import_csv(rows: list[dict]) -> str:
     """The rows in the product-template format (name,kind,terms,weight,url,notes)."""
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["name", "kind", "terms", "weight", "url", "notes"])
+    writer.writerow(["name", "kind", "terms", "weight", "url", "notes", "family"])
     for r in rows:
         writer.writerow(
-            [r["name"], r["kind"], "; ".join(r["terms"]), r["weight"], r["url"], r["notes"]]
+            [r["name"], r["kind"], "; ".join(r["terms"]), r["weight"], r["url"], r["notes"],
+             r["family"]]
         )
     return out.getvalue()

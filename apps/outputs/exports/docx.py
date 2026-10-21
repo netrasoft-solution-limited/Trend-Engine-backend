@@ -52,6 +52,9 @@ def render(document: ExportDocument) -> bytes:
     doc = Document()
     _set_base_style(doc)
     _pin_core_properties(doc)
+    if document.brand:
+        _running(doc.sections[0].header.paragraphs[0], document.running_header)
+        _running(doc.sections[0].footer.paragraphs[0], document.running_footer)
 
     if document.has_notice:
         notice = doc.add_paragraph()
@@ -97,6 +100,8 @@ def render(document: ExportDocument) -> bytes:
                     # into Google Docs and Pages rather than relying on a style
                     # this file would have to define.
                     _add_linked(doc.add_paragraph(style="List Bullet"), item)
+            elif block.is_table:
+                _add_table(doc, block)
             else:
                 _add_linked(doc.add_paragraph(), block.text)
 
@@ -115,6 +120,25 @@ def render(document: ExportDocument) -> bytes:
     buffer = io.BytesIO()
     doc.save(buffer)
     return _normalise(buffer.getvalue())
+
+
+def _running(paragraph, text: str) -> None:
+    run = paragraph.add_run(text)
+    run.font.size = Pt(8)
+    run.font.color.rgb = MUTED
+
+
+def _add_table(doc, block) -> None:
+    table = doc.add_table(rows=1 + len(block.rows), cols=len(block.header))
+    table.style = "Table Grid"
+    for r, row in enumerate((block.header, *block.rows)):
+        for c, text in enumerate(row):
+            paragraph = table.cell(r, c).paragraphs[0]
+            _add_linked(paragraph, text)
+            for run in paragraph.runs:
+                run.font.size = Pt(9.5)
+                run.bold = r == 0 or None
+    doc.add_paragraph()
 
 
 def _add_linked(paragraph, text: str) -> None:

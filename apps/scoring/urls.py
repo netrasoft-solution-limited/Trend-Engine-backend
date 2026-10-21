@@ -1,7 +1,7 @@
 """URL patterns for scoring, mounted at the ops origin root by config/urls_ops.py."""
 from django.urls import path
 
-from . import views, views_review
+from . import views, views_opportunities, views_review
 
 urlpatterns = [
     # Triage · Signal review (PRD §6.5). The client is in the path, as on the
@@ -12,6 +12,27 @@ urlpatterns = [
         "triage/<slug:slug>/<str:code>/",
         views_review.SignalReviewView.as_view(),
         name="ops-signal",
+    ),
+    # New-product opportunities and the imported AI benchmark (Mark, 20 Oct).
+    path(
+        "opportunities/<slug:slug>/",
+        views_opportunities.CandidateListView.as_view(),
+        name="ops-candidates",
+    ),
+    path(
+        "opportunities/<slug:slug>/<int:pk>/",
+        views_opportunities.CandidateView.as_view(),
+        name="ops-candidate",
+    ),
+    path(
+        "benchmark/<slug:slug>/",
+        views_opportunities.BenchmarkView.as_view(),
+        name="ops-benchmark",
+    ),
+    path(
+        "benchmark/<slug:slug>/template.csv",
+        views_opportunities.BenchmarkTemplateView.as_view(),
+        name="ops-benchmark-template",
     ),
     path(
         "relevance/<slug:slug>/",

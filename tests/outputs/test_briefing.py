@@ -8,6 +8,7 @@ unapproved, another client's advice, sponsored evidence, and internal scores.
 from __future__ import annotations
 
 import io
+import re
 
 import pytest
 
@@ -90,9 +91,10 @@ def test_the_brief_says_what_changed_why_it_matters_and_what_to_do(jarrow, appro
     headings = [s["heading"] for s in brief.sections]
     body = text_of(brief)
 
-    assert headings[0] == "In brief"
+    assert headings[:2] == ["About this brief", "Executive summary"]
     assert "Magnesium becomes a choice by goal" in headings
-    assert headings[-2:] == ["Next 14 days", "How this was put together"]
+    assert headings[-2:] == ["Coverage and method", "Sources"]
+    assert "Next 14 days" in headings
     assert "What changed. Creators recommend magnesium forms by goal." in body
     assert f"Why it matters to {jarrow.name}. {approved.why_it_matters}" in body
     assert "Content/SEO: Publish a 'which magnesium for which goal' guide." in body
@@ -272,10 +274,11 @@ def test_a_single_day_and_a_name_ending_in_s_read_naturally(jarrow, approved):
     with operator_scope():
         jarrow.name = "Jarrow Formulas"
         jarrow.save(update_fields=["name"])
-    method = brief_for(jarrow).sections[-1]["text"]
+    sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
 
-    assert "Jarrow Formulas' profile" in method
-    assert " published on " in method and "between" not in method
+    assert "Jarrow Formulas' profile" in sections["Coverage and method"]
+    about = sections["About this brief"]
+    assert re.search(r" on \d{1,2} [A-Z][a-z]+ \d{4}", about) and "between" not in about
 
 
 def test_the_recommendation_prompt_states_evidence_strength_in_words(jarrow, evidence):
@@ -299,7 +302,7 @@ def test_each_development_states_its_status(jarrow, approved):
     body = text_of(brief)
 
     assert "Status. Recurring discussion: raised in more than one week" in body
-    assert "(recurring discussion)" in brief.sections[0]["text"]
+    assert "| Recurring discussion |" in brief.sections[1]["text"]
 
 
 def test_the_recommendation_prompt_carries_the_status_and_the_rule(jarrow, evidence):
@@ -312,3 +315,139 @@ def test_the_recommendation_prompt_carries_the_status_and_the_rule(jarrow, evide
     call = transport.calls[0]
     assert "Status: Watch item." in call["messages"][0]["content"]
     assert "do not call it rising" in str(call["system"])
+
+
+# ── The full content package (Mark, 20 Oct) ─────────────────────────────────
+
+
+def test_the_content_package_carries_every_piece_labelled_as_a_draft(jarrow, approved, evidence):
+    from apps.evidence.models import Observation
+    from apps.intelligence.models import SignalObservation
+    from apps.outputs.content_brief import FAQ
+
+    _, claims = evidence
+    reddit = Observation.objects.create(
+        url="https://www.reddit.com/r/Supplements/x", title="Which magnesium for sleep?",
+        source_type="reddit", observed_at="2026-10-20", published_at="2026-10-08",
+        excerpt="Shopper cannot reconcile label numbers", entered_by="abu",
+    )
+    SignalObservation.objects.create(signal=approved.signal, observation=reddit, added_by="abu")
+    llm = writing(
+        outline=[OutlineSection(heading="Start with the question", purpose="Hook",
+                                claim_ids=[claims["glycinate"].pk],
+                                observation_ids=[reddit.pk, 777_777])],
+        sab_specialty="A registered dietitian",
+        article_draft="If the numbers on a magnesium label confuse you, you are not alone.",
+        faqs=[FAQ(product="MagMind", question="How do they differ?", answer="Compare the panels."),
+              FAQ(product="Some Rival Product", question="Q?", answer="A.")],
+        video_script="Why magnesium labels look confusing.",
+        email_subject="Which magnesium?", email_body="A label guide.",
+        email_button="Read the guide",
+        social_posts=["Label numbers make no sense? You are not alone."],
+        ai_questions=["Which magnesium is best for sleep?"],
+        what_to_measure=["Article visits", "Email clicks"],
+    )
+
+    with scoped(jarrow):
+        sections, _, _ = content_brief.sections_for(jarrow, approved, client=llm)
+    body = {s["heading"].split(":")[0]: s["text"] for s in sections}
+
+    assert "draws on E1, E2" in body["Outline"], "the invented observation number is gone"
+    assert "Which magnesium for sleep?" in body["Evidence to use"]
+    assert content_brief.DRAFT_LABEL in body["Article draft"]
+    assert "MagMind: How do they differ?" in body["Product-page FAQ drafts"]
+    assert "Some Rival Product" not in body["Product-page FAQ drafts"]
+    assert "Subject: Which magnesium?" in body["Email draft"]
+    for heading in ("Short video script", "Social posts", "AI questions to win",
+                    "What to measure", "Suggested Science Advisory Board specialty"):
+        assert heading in body, heading
+
+
+def test_an_observation_line_names_the_kind_of_figure(db):
+    from apps.evidence.models import Observation
+
+    o = Observation(
+        url="https://www.tiktok.com/x", title="Spermidine listing", source_type="tiktok_shop",
+        observed_at=__import__("datetime").date(2026, 10, 20), metric_kind="lifetime_shop_sales",
+        metric_value=4600, metric_label="4.6K items sold", is_ad=True, entered_by="abu",
+    )
+
+    line = briefing.observation_line(o)
+
+    assert "4.6K items sold (global lifetime items sold)" in line
+    assert "Labelled: advertisement." in line
+
+
+# ── The delivered portfolio shape (Mark, 20 Oct) ────────────────────────────
+
+
+def test_the_family_map_assigns_every_listing_and_marks_the_featured_family(jarrow, approved):
+    from apps.clients.models import ClientAsset
+
+    with scoped(jarrow):
+        ClientAsset.objects.filter(name="MagMind").update(family="Sleep & Mood")
+        ClientAsset.objects.filter(name="Magnesium Glycinate").update(family="Minerals")
+        ClientAsset.objects.create(
+            organization=jarrow, profile=ClientAsset.objects.get(name="MagMind").profile,
+            name="Saccharomyces Boulardii", terms=["boulardii"], family="Gut & Digestion",
+        )
+
+    sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
+
+    family = sections["The full portfolio"]
+    assert "Each of the 3 listings" in family
+    assert "| Sleep & Mood | 1 | Featured story | MagMind |" in family
+    assert "| Gut & Digestion | 1 | Monitoring | Saccharomyces Boulardii |" in family
+    assert "3 listings reviewed · 3 listening families" in sections["Executive summary"]
+
+
+def test_sources_are_numbered_once_and_cited_inline(jarrow, approved):
+    from apps.evidence.models import Observation
+    from apps.intelligence.models import SignalObservation
+
+    reddit = Observation.objects.create(
+        url="https://www.reddit.com/r/Supplements/x", title="Which magnesium for sleep?",
+        source_type="reddit", observed_at="2026-10-20", published_at="2026-10-08",
+        excerpt="Shopper cannot reconcile label numbers", is_brand_content=True,
+        entered_by="abu",
+    )
+    SignalObservation.objects.create(signal=approved.signal, observation=reddit, added_by="abu")
+
+    brief = brief_for(jarrow)
+    sections = {s["heading"]: s["text"] for s in brief.sections}
+    sources = sections["Sources"].splitlines()[1:]
+    numbers = [re.match(r"· \[(\d+)\]", line).group(1) for line in sources]
+
+    assert numbers == [str(n) for n in range(1, len(sources) + 1)]
+    reddit_line = next(line for line in sources if "reddit.com" in line)
+    n = re.match(r"· \[(\d+)\]", reddit_line).group(1)
+    assert "8 Oct 2026" in reddit_line and "brand content" in reddit_line.lower()
+    assert "Shopper cannot reconcile label numbers" in text_of(brief)
+    assert f"[{n}]" in sections["Magnesium becomes a choice by goal"]
+    assert "1 Reddit" in sections["Coverage and method"]
+
+
+def test_outline_numbers_hold_when_a_later_section_adds_a_claim(jarrow, approved, evidence):
+    from apps.evidence.models import Observation
+    from apps.intelligence.models import SignalObservation
+
+    _, claims = evidence
+    reddit = Observation.objects.create(
+        url="https://www.reddit.com/r/Supplements/x", title="Which magnesium for sleep?",
+        source_type="reddit", observed_at="2026-10-20", entered_by="abu",
+    )
+    SignalObservation.objects.create(signal=approved.signal, observation=reddit, added_by="abu")
+    first, second = claims["glycinate"].pk, claims["threonate"].pk
+    llm = writing(outline=[
+        OutlineSection(heading="Open", purpose="Hook", claim_ids=[first],
+                       observation_ids=[reddit.pk]),
+        OutlineSection(heading="Compare", purpose="Explain", claim_ids=[second]),
+    ])
+
+    with scoped(jarrow):
+        sections, _, _ = content_brief.sections_for(jarrow, approved, client=llm)
+    body = {s["heading"].split(":")[0]: s["text"] for s in sections}
+
+    assert "Open — Hook (draws on E1, E3)" in body["Outline"]
+    assert "E3. " in body["Evidence to use"] and "reddit.com" in body["Evidence to use"]
+    assert "[1]" not in body["Evidence to use"], "E-numbers only, no source numbers"

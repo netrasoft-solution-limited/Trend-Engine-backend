@@ -75,7 +75,8 @@ def test_the_form_marks_the_types_that_are_not_built(client, admin):
 
     page = client.get(reverse("ops-outputs")).content.decode()
 
-    assert "Product / opportunity memo — not built yet" in page
+    assert "Research alert — not built yet" in page
+    assert "Product / opportunity memo — not built yet" not in page
     assert "Trend intelligence brief — not built yet" not in page
     assert "Content brief / draft — not built yet" not in page
 
@@ -255,3 +256,19 @@ def test_a_notification_without_a_delivery_is_not_called_sent(client, admin, rea
 
     assert "Sent to the client" not in page
     assert "Not delivered." in page and "there is no delivery record" in page
+
+
+def test_the_opportunity_brief_drafts_from_approved_candidates(client, admin, real_client):
+    from tests.outputs import test_opportunity_brief as opp
+
+    opp.approved(real_client, "Spermidine", [opp.obs()], test_type="customer")
+    client.force_login(admin)
+
+    response = _draft(client, real_client, type=OutputType.PRODUCT_MEMO)
+
+    assert "new product opportunity brief" in response.content.decode()
+    with operator_scope():
+        output = Output.objects.get(type=OutputType.PRODUCT_MEMO)
+        version = output.versions.get()
+    assert output.client_profile_version
+    assert any(s["heading"].startswith("Candidate 1: Spermidine") for s in version.body)

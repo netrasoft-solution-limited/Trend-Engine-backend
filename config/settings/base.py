@@ -298,6 +298,10 @@ DEFAULT_FROM_EMAIL = _email["DEFAULT_FROM_EMAIL"]
 RESEND_API_KEY = _email["RESEND_API_KEY"]
 PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:5173")
 
+#: The consultancy every export is issued under: the cover band, running
+#: header and footer. Blank exports unbranded documents.
+EXPORT_BRAND = env("EXPORT_BRAND", "Pure Play Ecommerce Consulting")
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True

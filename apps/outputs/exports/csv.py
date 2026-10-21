@@ -40,6 +40,9 @@ def render(document: ExportDocument) -> bytes:
             if block.is_bullets:
                 for item in block.items:
                     writer.writerow([section.heading, unlinked(item)])
+            elif block.is_table:
+                for row in (block.header, *block.rows):
+                    writer.writerow([section.heading, unlinked(" | ".join(row))])
             else:
                 writer.writerow([section.heading, unlinked(block.text)])
 

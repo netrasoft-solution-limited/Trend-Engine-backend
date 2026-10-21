@@ -1,0 +1,122 @@
+{% extends "ops/base.html" %}
+{% block title %}{{ candidate.name }} · {{ organization.name }}{% endblock %}
+{% block content %}
+  <p class="note"><a href="{% url 'ops-candidates' organization.slug %}">← Candidates for {{ organization.name }}</a></p>
+  <h1>{{ candidate.name }}{% if candidate.is_approved %}<span class="pill live">approved</span>{% endif %}</h1>
+  <p class="lede">
+    {{ candidate.get_status_display }} · priority {{ candidate.priority }}
+    {% if candidate.is_approved %} · approved by {{ candidate.approved_by_label }} {{ candidate.approved_at|date:"j M Y H:i" }}{% endif %}
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="name">1. Catalogue gap check</span>
+      <p>{{ gap }}</p>
+      {% for f in candidate.gap_check.found %}
+        <div class="note">{{ f.name }}{% if f.family %} ({{ f.family }}){% endif %} — “{{ f.term }}” in {{ f.field }}</div>
+      {% endfor %}
+      {% if candidate.gap_check %}<p class="note">Checked {{ candidate.gap_check.checked_at|slice:":16" }} against {{ candidate.gap_check.profile }}. Searches: {{ candidate.names|join:", " }}.</p>{% endif %}
+      <form method="post" class="inline">{% csrf_token %}
+        <button type="submit" name="action" value="gap" class="small secondary">Check again</button>
+      </form>
+      <p class="note">A public catalogue cannot see retail-only lines or the pipeline. Record what {{ organization.name }} confirms under the case below.</p>
+    </div>
+    <div class="card">
+      <span class="name">2. Adjacent listings</span>
+      <p>{{ candidate.adjacent|join:", "|default:"None chosen." }}</p>
+      <form method="post">{% csrf_token %}
+        <input type="text" name="adjacent" value="{{ candidate.adjacent|join:', ' }}" list="listings" placeholder="Listing names, comma separated">
+        <datalist id="listings">{% for name in listings %}<option value="{{ name }}">{% endfor %}</datalist>
+        <div class="actions">
+          <button type="submit" name="action" value="adjacent.set" class="small">Save</button>
+          <button type="submit" name="action" value="adjacent.suggest" class="small secondary">Suggest from theme “{{ candidate.theme|default:'—' }}”</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="name">3. Observations</span>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Observation</th><th>Source</th><th>Dates</th><th>Figure</th><th>Labels</th><th></th></tr></thead>
+        <tbody>
+          {% for o in observations %}
+            <tr>
+              <td class="muted"><a href="{% url 'ops-observation' o.pk %}">O{{ o.pk }}</a></td>
+              <td><a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:70 }}</a></td>
+              <td class="muted">{{ o.get_source_type_display }}</td>
+              <td class="muted">{{ o.published_at|date:"j M Y"|default:"—" }}</td>
+              <td>{% if o.metric_kind %}{{ o.metric_label|default:o.metric_value }}<div class="note" style="margin-top:2px">{{ o.get_metric_kind_display }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td>{% for label in o.labels %}<span class="pill illustrative">{{ label }}</span>{% endfor %}</td>
+              <td><form method="post">{% csrf_token %}<input type="hidden" name="observation" value="{{ o.pk }}"><button type="submit" name="action" value="obs.detach" class="small danger">Detach</button></form></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">None attached. Enter them on <a href="{% url 'ops-observations' %}?topic={{ candidate.name|urlencode }}">Observations</a>, then attach them by number.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" class="inline" style="margin-top:12px">{% csrf_token %}
+      <input type="text" name="ids" placeholder="O12, O13, 14-18" style="flex:1">
+      <button type="submit" name="action" value="obs.attach" class="small">Attach</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">4. The case</span>
+      <form method="post">{% csrf_token %}
+        <button type="submit" name="action" value="draft" class="small secondary" {% if not observations %}disabled{% endif %}>Draft from the observations (one model call)</button>
+      </form>
+    </div>
+    <form method="post">{% csrf_token %}
+      <div class="grid2">
+        <div>
+          <label for="status">Status</label>
+          <select id="status" name="status">{% for v, l in statuses %}<option value="{{ v }}" {% if v == candidate.status %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        </div>
+        <div>
+          <label for="priority">Priority (1 is first)</label>
+          <input type="number" id="priority" name="priority" min="0" value="{{ candidate.priority }}">
+        </div>
+        <div>
+          <label for="test_type">Test</label>
+          <select id="test_type" name="test_type">{% for v, l in test_types %}<option value="{{ v }}" {% if v == candidate.test_type %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        </div>
+        <div>
+          <label for="internal_check">{{ organization.name }}'s own check</label>
+          <select id="internal_check" name="internal_check">{% for v, l in checks %}<option value="{{ v }}" {% if v == candidate.internal_check %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        </div>
+      </div>
+      <label for="opening">Commercial opening (one sentence)</label>
+      <textarea id="opening" name="opening" style="min-height:50px">{{ candidate.opening }}</textarea>
+      <label for="why_it_matters">Why it could matter (cite O-numbers)</label>
+      <textarea id="why_it_matters" name="why_it_matters">{{ candidate.why_it_matters }}</textarea>
+      <label for="test_plan">What to test next</label>
+      <textarea id="test_plan" name="test_plan">{{ candidate.test_plan }}</textarea>
+      <label for="next_step">Recommended next step (short)</label>
+      <input type="text" id="next_step" name="next_step" value="{{ candidate.next_step }}">
+      <label for="gate">Gate: what must be true before advancing</label>
+      <textarea id="gate" name="gate" style="min-height:50px">{{ candidate.gate }}</textarea>
+      <label for="limits">What this does not show</label>
+      <textarea id="limits" name="limits" style="min-height:50px">{{ candidate.limits }}</textarea>
+      <label for="internal_note">Note on {{ organization.name }}'s check</label>
+      <input type="text" id="internal_note" name="internal_note" value="{{ candidate.internal_note }}">
+      <label for="theme">Theme</label>
+      <input type="text" id="theme" name="theme" value="{{ candidate.theme }}">
+      <div class="actions">
+        <button type="submit" name="action" value="edit">Save</button>
+        {% if candidate.is_approved %}<span class="note">Saving withdraws the approval.</span>{% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <span class="name">5. Approve for the brief</span>
+    <p class="note">Needs the opening, next step, gate, a gap check and at least one observation. Approval is not publication: the brief is reviewed and published from Outputs.</p>
+    <form method="post">{% csrf_token %}
+      <button type="submit" name="action" value="approve" {% if candidate.is_approved %}disabled{% endif %}>{% if candidate.is_approved %}Approved{% else %}Approve {{ candidate.name }}{% endif %}</button>
+    </form>
+  </div>
+{% endblock %}

@@ -195,6 +195,20 @@ operator decide each of those.
         drafted {{ recommendation.created_at|date:"j M, H:i" }}{% if recommendation.model_run %} by {{ recommendation.model_run.model }}{% endif %}
       </p>
 
+      <details style="margin-top:10px">
+        <summary>AI benchmark questions ({{ recommendation.benchmark_questions|length }} tied)</summary>
+        {% if benchmark_options %}
+          <form method="post" style="margin-top:8px">{% csrf_token %}
+            {% for q in benchmark_options %}
+              <label class="check"><input type="checkbox" name="questions" value="{{ q }}" {% if q in recommendation.benchmark_questions %}checked{% endif %}> {{ q }}</label>
+            {% endfor %}
+            <div class="actions"><button type="submit" name="action" value="rec.benchmark" class="small secondary">Save</button></div>
+          </form>
+        {% else %}
+          <p class="note">No answers imported. <a href="{% url 'ops-benchmark' organization.slug %}">Import the AI Brand Test →</a></p>
+        {% endif %}
+      </details>
+
       {% if recommendation.state == "proposed" or recommendation.state == "operator edited" %}
         <details style="margin-top:12px">
           <summary>Edit</summary>
@@ -263,6 +277,46 @@ operator decide each of those.
     <span class="name">Contradicting evidence ({{ contradicting|length }})</span>
     <p class="note">Kept, not discarded: disagreement is part of the finding.</p>
     {% include "ops/scoring/_evidence_rows.html" with rows=contradicting organization=organization %}
+  </div>
+
+  <div class="card" id="observations">
+    <div class="row">
+      <span class="name">Observations ({{ observations|length }})</span>
+      <span class="state">{{ independent_observations }} independent supporting event(s)</span>
+    </div>
+    <p class="note">
+      Hand-entered evidence — community posts, Shop listings, search figures — attached by an operator.
+      Observations sharing an event key count once.
+    </p>
+    {% if observations %}
+      <div class="table-wrap"><table><tbody>
+        {% for link in observations %}{% with o=link.observation %}
+          <tr>
+            <td class="muted" style="width:56px">O{{ o.pk }}</td>
+            <td>
+              <a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:90 }}</a>
+              <div class="note" style="margin-top:2px">
+                {{ o.get_source_type_display }}{% if o.published_at %} · {{ o.published_at|date:"j M Y" }}{% endif %}
+                · observed {{ o.observed_at|date:"j M Y" }}
+                {% if o.metric_kind %}· {{ o.metric_label|default:o.metric_value }} ({{ o.get_metric_kind_display|lower }}){% endif %}
+                {% for label in o.labels %}<span class="pill illustrative">{{ label }}</span>{% endfor %}
+                {% if link.role == "contradicts" %}<span class="pill">contradicts</span>{% endif %}
+              </div>
+            </td>
+            <td style="width:80px">
+              <form method="post">{% csrf_token %}<input type="hidden" name="action" value="obs.detach"><input type="hidden" name="observation" value="{{ o.pk }}"><button type="submit" class="small secondary">Detach</button></form>
+            </td>
+          </tr>
+        {% endwith %}{% endfor %}
+      </tbody></table></div>
+    {% endif %}
+    <form method="post" class="inline" style="margin-top:10px">{% csrf_token %}
+      <input type="hidden" name="action" value="obs.attach">
+      <input type="text" name="ids" placeholder="Observation numbers, e.g. O12, O15" style="flex:1;min-width:220px">
+      <select name="role"><option value="supports">supports</option><option value="contradicts">contradicts</option></select>
+      <button type="submit" class="small">Attach</button>
+      <a href="{% url 'ops-observations' %}" target="_blank">Find observations →</a>
+    </form>
   </div>
 
   <div class="card">

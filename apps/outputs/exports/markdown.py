@@ -36,6 +36,11 @@ def render(document: ExportDocument) -> bytes:
             if block.is_bullets:
                 lines += [f"- {item}" for item in block.items]
                 lines.append("")
+            elif block.is_table:
+                lines.append("| " + " | ".join(block.header) + " |")
+                lines.append("|" + "---|" * len(block.header))
+                lines += ["| " + " | ".join(row) + " |" for row in block.rows]
+                lines.append("")
             else:
                 lines += [block.text, ""]
 

@@ -35,7 +35,7 @@ from apps.tenancy.context import operator_scope, scoped
 from apps.tenancy.models import Organization
 
 from . import recommendations, signal_rank
-from .models import ClientSignalScore, Recommendation
+from .models import BenchmarkAnswer, ClientSignalScore, Recommendation
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +246,13 @@ class SignalReviewView(View):
                     "sources": settings.SIGNAL_COVERED_WEEK_MIN_SOURCES,
                 },
                 "supporting": [r for r in evidence if r.role == SignalEvidence.Role.SUPPORTS],
+                "observations": list(
+                    signal.observations.select_related("observation").order_by("role", "added_at")
+                ),
+                "independent_observations": len({
+                    link.observation.independence_key for link in signal.observations.all()
+                    if link.role == "supports"
+                }),
                 "contradicting": [
                     r for r in evidence if r.role == SignalEvidence.Role.CONTRADICTS
                 ],
@@ -253,6 +260,10 @@ class SignalReviewView(View):
                 "client_components": _components(score.components, signal_rank.RANK_WEIGHTS)
                 if score else [],
                 "recommendation": recommendation,
+                "benchmark_options": list(
+                    BenchmarkAnswer.objects.filter(organization=organization)
+                    .values_list("question", flat=True).distinct().order_by("question")
+                ),
                 "action_rows": _action_rows(recommendation),
                 "history": history,
                 "products": products,
@@ -273,6 +284,24 @@ class SignalReviewView(View):
         back = redirect(reverse("ops-signal", args=[slug, code]))
 
         try:
+            if action == "obs.attach":
+                attached, missing = review.attach_observations(
+                    signal, review.parse_observation_ids(request.POST.get("ids") or ""),
+                    role=request.POST.get("role") or "supports", actor_label=actor,
+                )
+                if attached:
+                    messages.success(request, f"Attached {len(attached)} observation(s).")
+                if missing:
+                    messages.error(
+                        request, "No observation " + ", ".join(f"O{m}" for m in missing) + "."
+                    )
+                return back
+            if action == "obs.detach":
+                review.detach_observation(
+                    signal, int(request.POST.get("observation") or 0), actor_label=actor
+                )
+                messages.info(request, "Detached.")
+                return back
             if action == "signal.move":
                 review.move(
                     signal, request.POST.get("to") or "", actor_label=actor,
@@ -322,6 +351,14 @@ class SignalReviewView(View):
             messages.success(request, "Saved.")
             if any(edited.validation.values()):
                 messages.warning(request, f"Removed on save: {_describe(edited.validation)}.")
+        elif action == "rec.benchmark":
+            current.benchmark_questions = request.POST.getlist("questions")
+            current.save(update_fields=["benchmark_questions", "updated_at"])
+            recommendations._audit(
+                organization, actor, f"Set AI benchmark questions on {signal.code}",
+                {"recommendation_id": current.pk, "questions": current.benchmark_questions},
+            )
+            messages.success(request, f"{len(current.benchmark_questions)} question(s) tied.")
         elif action == "rec.approve":
             recommendations.decide(current, approve=True, actor_label=actor)
             messages.success(request, "Approved. It can now go into a brief for this client.")

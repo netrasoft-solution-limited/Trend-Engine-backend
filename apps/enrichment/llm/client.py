@@ -88,6 +88,12 @@ def recommendation_tier() -> Tier:
     return _tier("recommendation", "claude-opus-5-5", 4000)
 
 
+def content_tier() -> Tier:
+    # A whole content package — article, FAQs, email, video, social — in one
+    # call: the strong model, with room for the longest piece.
+    return _tier("content", "claude-opus-5-5", 8000)
+
+
 def drafting_tier() -> Tier:
     # Arch §10.3: "stronger tier only for client-facing drafting."
     return _tier("drafting", "claude-opus-5-5", 16000)

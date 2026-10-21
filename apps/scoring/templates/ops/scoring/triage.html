@@ -60,6 +60,11 @@ how much it matters to them, how sure we are, and what has been decided.
         <button type="submit">Draft the brief from {{ approved_developments }} development(s)</button>
       </form>
     {% endif %}
+    <p class="note">
+      Also for {{ organization.name }}:
+      <a href="{% url 'ops-candidates' organization.slug %}">New-product candidates →</a> ·
+      <a href="{% url 'ops-benchmark' organization.slug %}">AI benchmark →</a>
+    </p>
   </div>
 
   <div class="card">

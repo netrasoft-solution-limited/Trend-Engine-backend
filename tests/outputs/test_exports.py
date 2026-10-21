@@ -471,3 +471,62 @@ def test_the_pdf_renderer_pins_the_font_subsetter_clock():
     import os
 
     assert os.environ.get("SOURCE_DATE_EPOCH") == exports.FIXED_EPOCH
+
+
+# ── Tables and the brand (Mark's delivered briefs, 20 Oct) ──────────────────
+
+TABLE_BODY = [{
+    "heading": "Search demand",
+    "text": (
+        "Estimated monthly US searches.\n\n"
+        "| Ingredient query | US searches per month |\n"
+        "|---|---|\n"
+        "| Spermidine | 14,800 |\n"
+        "| [Akkermansia](https://example.com/a) | 33,100 |"
+    ),
+}]
+
+
+def test_pipe_lines_parse_to_one_table_with_its_header():
+    parsed = text.blocks(TABLE_BODY[0]["text"])
+
+    assert parsed[0].text == "Estimated monthly US searches."
+    table = parsed[1]
+    assert table.is_table and not table.is_bullets
+    assert table.header == ("Ingredient query", "US searches per month")
+    assert table.rows[0] == ("Spermidine", "14,800")
+
+
+def test_a_table_survives_into_every_text_format():
+    document = doc(body=TABLE_BODY)
+
+    html = exports.render(document, "html").content.decode()
+    assert "<th>Ingredient query</th>" in html
+    assert '<a href="https://example.com/a">Akkermansia</a>' in html
+    markdown = exports.render(document, "markdown").content.decode()
+    assert "| Spermidine | 14,800 |" in markdown
+    csv = exports.render(document, "csv").content.decode()
+    assert "Spermidine | 14,800" in csv
+
+
+def test_the_brand_is_on_the_cover_and_running_lines(settings):
+    settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
+    html = exports.render(doc(), "html").content.decode()
+
+    assert '<div class="brand">PURE PLAY ECOMMERCE CONSULTING</div>' in html
+    assert "Confidential. Prepared for Jarrow Formulas." in html
+    settings.EXPORT_BRAND = ""
+    assert 'class="brand"' not in exports.render(doc(), "html").content.decode()
+
+
+@requires_docx
+def test_a_docx_carries_the_table_and_the_running_header(settings):
+    import io
+
+    from docx import Document
+
+    settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
+    word = Document(io.BytesIO(exports.render(doc(body=TABLE_BODY), "docx").content))
+
+    assert word.tables[0].cell(1, 0).text == "Spermidine"
+    assert "PURE PLAY ECOMMERCE CONSULTING" in word.sections[0].header.paragraphs[0].text

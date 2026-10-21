@@ -92,6 +92,18 @@ class ExportDocument:
     provenance: Provenance = field(default_factory=Provenance)
     is_illustrative: bool = False
     is_corrected: bool = False
+    #: The consultancy the document is issued under, from `EXPORT_BRAND`.
+    #: Blank leaves every format unbranded.
+    brand: str = ""
+
+    @property
+    def running_header(self) -> str:
+        when = f" | {self.dated:%B %Y}" if self.dated else ""
+        return f"{self.brand.upper()} · {self.organization_name} | {self.type_label}{when}"
+
+    @property
+    def running_footer(self) -> str:
+        return f"Prepared by {self.brand} | Confidential. Prepared for {self.organization_name}."
 
     @property
     def notice(self) -> str:
@@ -147,6 +159,7 @@ def document_from_body(
     provenance: Provenance | None = None,
     is_illustrative: bool = False,
     corrections: tuple[str, ...] | list[str] = (),
+    brand: str | None = None,
 ) -> ExportDocument:
     """Build a document from the stored `body` shape.
 
@@ -168,7 +181,10 @@ def document_from_body(
             if text and text.strip()
         )
         + tuple(
-            Section(heading=str(entry.get("heading") or ""), blocks=blocks(str(entry.get("text") or "")))
+            Section(
+                heading=str(entry.get("heading") or ""),
+                blocks=blocks(str(entry.get("text") or "")),
+            )
             for entry in (body or [])
         ),
         is_draft=is_draft,
@@ -176,4 +192,11 @@ def document_from_body(
         provenance=provenance or Provenance(),
         is_illustrative=is_illustrative,
         is_corrected=any(text and text.strip() for text in corrections),
+        brand=_brand() if brand is None else brand,
     )
+
+
+def _brand() -> str:
+    from django.conf import settings
+
+    return getattr(settings, "EXPORT_BRAND", "")

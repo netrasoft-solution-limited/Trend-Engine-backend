@@ -24,7 +24,20 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     size: A4;
     margin: 22mm 20mm 20mm;
     @bottom-center { content: counter(page); font: 9pt Georgia, serif; color: #6b6864; }
+    @top-left { content: string(running); font: 7.5pt "DejaVu Sans", Helvetica, sans-serif; color: #6b6864; }
+    @bottom-left { content: string(footer); font: 7.5pt "DejaVu Sans", Helvetica, sans-serif; color: #6b6864; }
   }
+  .running { string-set: running content(); display: none; }
+  .footer-text { string-set: footer content(); display: none; }
+  .brand {
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 8.5pt; font-weight: bold; letter-spacing: .14em;
+    color: #fff; background: #1f5140; padding: 8pt 10pt; margin: 0 0 18pt;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 11pt; font-size: 9.5pt; }
+  th, td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: .5pt solid #d9d6d0; }
+  th { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; font-size: 8.5pt; color: #1f5140; border-bottom: 1pt solid #1f5140; }
+  tr { page-break-inside: avoid; }
   html { font-size: 11pt; }
   /* `@page` margins apply only when printing, so on screen the same file would
      open edge-to-edge. Scoped to screen so the PDF keeps its page margins and
@@ -82,6 +95,11 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
 </style>
 </head>
 <body>
+  {% if document.brand %}
+    <div class="brand">{{ document.brand|upper }}</div>
+    <span class="running">{{ document.running_header }}</span>
+    <span class="footer-text">{{ document.running_footer }}</span>
+  {% endif %}
   {% if document.has_notice %}<div class="notice">{{ document.notice }}</div>{% endif %}
 
   <h1>{{ document.title }}</h1>
@@ -96,6 +114,11 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     {% for block in section.blocks %}
       {% if block.is_bullets %}
         <ul>{% for item in block.items %}<li>{{ item|linked }}</li>{% endfor %}</ul>
+      {% elif block.is_table %}
+        <table>
+          <thead><tr>{% for cell in block.header %}<th>{{ cell|linked }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for row in block.rows %}<tr>{% for cell in row %}<td>{{ cell|linked }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table>
       {% else %}
         <p>{{ block.text|linked }}</p>
       {% endif %}

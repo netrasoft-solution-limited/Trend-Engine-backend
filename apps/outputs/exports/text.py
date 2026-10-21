@@ -7,6 +7,8 @@ and `apps/outputs/briefing.py`:
     paragraphs   separated by a blank line (\\n\\n)
     bullets      lines beginning with "·", single-newline separated
     quotes       curly, inside the prose
+    tables       lines beginning with "|", cells separated by "|"; the first
+                 row is the header and a |---| row under it is optional
     links        [label](https://…), inline — Markdown's own syntax, so the
                  Markdown export needs no translation and every other format
                  reads it through `spans()`
@@ -37,25 +39,37 @@ _WHITESPACE_ONLY = re.compile(r"^\s*$")
 _LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
 
 
+TABLE = "|"
+_RULE = re.compile(r"^\|?[\s:|-]+\|?$")
+
+
 @dataclass(frozen=True)
 class Paragraph:
     text: str
-
-    @property
-    def is_bullets(self) -> bool:
-        return False
+    is_bullets = False
+    is_table = False
 
 
 @dataclass(frozen=True)
 class Bullets:
     items: tuple[str, ...]
-
-    @property
-    def is_bullets(self) -> bool:
-        return True
+    is_bullets = True
+    is_table = False
 
 
-Block = Paragraph | Bullets
+@dataclass(frozen=True)
+class Table:
+    header: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+    is_bullets = False
+    is_table = True
+
+
+Block = Paragraph | Bullets | Table
+
+
+def _cells(line: str) -> tuple[str, ...]:
+    return tuple(c.strip() for c in line.strip().strip("|").split("|"))
 
 
 def blocks(text: str) -> tuple[Block, ...]:
@@ -84,6 +98,7 @@ def _parse_group(group: str) -> list[Block]:
     blocks_out: list[Block] = []
     pending_items: list[str] = []
     pending_lines: list[str] = []
+    pending_rows: list[tuple[str, ...]] = []
 
     def flush_lines() -> None:
         if pending_lines:
@@ -95,10 +110,24 @@ def _parse_group(group: str) -> list[Block]:
             blocks_out.append(Bullets(tuple(pending_items)))
             pending_items.clear()
 
+    def flush_rows() -> None:
+        if pending_rows:
+            width = len(pending_rows[0])
+            rows = tuple((r + ("",) * width)[:width] for r in pending_rows[1:])
+            blocks_out.append(Table(pending_rows[0], rows))
+            pending_rows.clear()
+
     for line in group.split("\n"):
         stripped = line.strip()
         if not stripped:
             continue
+        if stripped.startswith(TABLE):
+            flush_lines()
+            flush_items()
+            if not (pending_rows and _RULE.match(stripped)):
+                pending_rows.append(_cells(stripped))
+            continue
+        flush_rows()
         if stripped.startswith(BULLET):
             # A list interrupts prose, so the lead-in ("Sources (3):") becomes
             # its own paragraph rather than being swallowed into the first item.
@@ -112,6 +141,7 @@ def _parse_group(group: str) -> list[Block]:
 
     flush_lines()
     flush_items()
+    flush_rows()
     return blocks_out
 
 
@@ -125,6 +155,8 @@ def plain(text: str) -> str:
     for block in blocks(text):
         if block.is_bullets:
             parts.extend(block.items)
+        elif block.is_table:
+            parts.extend(" · ".join(r) for r in (block.header, *block.rows))
         else:
             parts.append(block.text)
     return unlinked("\n".join(parts))

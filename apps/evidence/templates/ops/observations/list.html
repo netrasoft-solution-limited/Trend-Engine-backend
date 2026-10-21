@@ -1,0 +1,72 @@
+{% extends "ops/base.html" %}
+{% block title %}Observations{% endblock %}
+{% block content %}
+  <h1>Observations</h1>
+  <p class="lede">
+    Evidence entered by hand: community posts, social and Shop listings, search figures. Each one
+    keeps its link, its dates and what kind of figure it is, and is labelled when it is an ad, brand
+    content, older material or missing coverage. Attach them to a development on its review page,
+    or to a new-product candidate.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="name">Import a sheet</span>
+      <p class="note">
+        Download the template, fill one row per observation, save as CSV. A search figure needs its
+        query, provider, geography and period. If any row is wrong nothing is imported, and you are
+        told which rows to fix.
+      </p>
+      <form method="post" action="{% url 'ops-observations-import' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="file" name="file" accept=".csv,text/csv" required>
+        <div class="actions">
+          <button type="submit">Import</button>
+          <a href="{% url 'ops-observations-template' %}">Download the template</a>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <span class="name">Find</span>
+      <form method="get" class="inline" style="margin-top:8px">
+        <input type="text" name="topic" value="{{ topic }}" placeholder="Topic, e.g. spermidine" style="flex:1">
+        <select name="source">
+          <option value="">All sources</option>
+          {% for value, label in sources %}<option value="{{ value }}" {% if value == source %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="small">Show</button>
+      </form>
+      <div class="actions"><a href="{% url 'ops-observation-new' %}"><button type="button" class="secondary">Add one by hand</button></a></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Observation</th><th>Source</th><th>Dates</th><th>Figure</th><th>Labels</th></tr></thead>
+        <tbody>
+          {% for o in observations %}
+            <tr>
+              <td class="muted"><a href="{% url 'ops-observation' o.pk %}">O{{ o.pk }}</a></td>
+              <td>
+                <a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.title|truncatechars:80 }}</a>
+                <div class="note" style="margin-top:2px">{{ o.topic }}{% if o.event_key %} · event: {{ o.event_key }}{% endif %}{% if o.provenance %} · {{ o.provenance }}{% endif %}</div>
+              </td>
+              <td class="muted">{{ o.get_source_type_display }}</td>
+              <td class="muted">{% if o.published_at %}published {{ o.published_at|date:"j M Y" }}<br>{% endif %}observed {{ o.observed_at|date:"j M Y" }}</td>
+              <td>
+                {% if o.metric_kind %}
+                  <b>{{ o.metric_label|default:o.metric_value }}</b>
+                  <div class="note" style="margin-top:2px">{{ o.get_metric_kind_display }}{% if o.query %} · “{{ o.query }}”, {{ o.provider }}, {{ o.geography }}, {{ o.period }}{% endif %}</div>
+                {% else %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td>{% for label in o.labels %}<span class="pill illustrative">{{ label }}</span>{% endfor %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="empty">No observations{% if topic or source %} match{% endif %}.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

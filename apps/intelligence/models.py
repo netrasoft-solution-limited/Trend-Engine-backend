@@ -197,3 +197,34 @@ class Digest(models.Model):
 
     def __str__(self) -> str:
         return f"Digest {self.window_start} – {self.window_end}"
+
+
+class SignalObservation(models.Model):
+    """A hand-entered observation attached to a signal by an operator.
+
+    The second kind of evidence beside `SignalEvidence` claims: a Reddit
+    question, a TikTok Shop listing, a search estimate. Attached deliberately,
+    never by a model, because these are what the operator found and chose to
+    rely on — the attachment records who decided that.
+    """
+
+    signal = models.ForeignKey(Signal, on_delete=models.CASCADE, related_name="observations")
+    observation = models.ForeignKey(
+        "evidence.Observation", on_delete=models.CASCADE, related_name="signal_links"
+    )
+    role = models.CharField(
+        max_length=16, choices=SignalEvidence.Role.choices, default=SignalEvidence.Role.SUPPORTS
+    )
+    added_by = models.CharField(max_length=200)
+    added_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ("signal", "role", "added_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["signal", "observation"], name="uniq_signal_observation"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.signal.code} {self.role} observation {self.observation_id}"
