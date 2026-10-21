@@ -8,7 +8,10 @@ operator decide each of those.
 {% block title %}{{ signal.code }} · {{ organization.name }}{% endblock %}
 
 {% block content %}
-  <h1>{{ signal.title }}</h1>
+  <h1>{{ signal.title }}{% if signal.origin == "analyst" %}<span class="pill illustrative">analyst-led</span>{% endif %}</h1>
+  {% if signal.origin == "analyst" %}
+    <p class="note">Started by {{ signal.created_by_label }} from observations, as an analyst-led story. It was not detected by automatic collection, and no movement over time is measured.</p>
+  {% endif %}
   <p class="lede">
     <a href="{% url 'ops-triage' organization.slug %}">← Triage for {{ organization.name }}</a> ·
     {{ signal.code }}
@@ -176,15 +179,16 @@ operator decide each of those.
               <td class="muted">{{ a.owner }}</td>
               <td>{{ a.action }}</td>
               <td class="muted">{{ a.success_measure }}</td>
-              <td>{% for id in a.claim_ids %}<a href="#c{{ id }}">C{{ id }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+              <td>{% for id in a.claim_ids %}<a href="#c{{ id }}">C{{ id }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% if a.claim_ids and a.observation_ids %}, {% endif %}{% for id in a.observation_ids %}<a href="{% url 'ops-observation' id %}">O{{ id }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
-      {% if recommendation.validation.invented_claim_ids or recommendation.validation.uncited_actions or recommendation.validation.unknown_products %}
+      {% if recommendation.validation.invented_claim_ids or recommendation.validation.invented_observation_ids or recommendation.validation.uncited_actions or recommendation.validation.unknown_products %}
         <p class="note state env">
           The validator removed:
           {% if recommendation.validation.invented_claim_ids %}claim numbers outside this evidence ({{ recommendation.validation.invented_claim_ids|join:", " }}); {% endif %}
+          {% if recommendation.validation.invented_observation_ids %}observation numbers not attached ({{ recommendation.validation.invented_observation_ids|join:", " }}); {% endif %}
           {% if recommendation.validation.uncited_actions %}{{ recommendation.validation.uncited_actions }} uncited action(s); {% endif %}
           {% if recommendation.validation.unknown_products %}products not in the profile ({{ recommendation.validation.unknown_products|join:", " }}){% endif %}
         </p>
@@ -223,14 +227,14 @@ operator decide each of those.
                 <label class="check"><input type="checkbox" name="products" value="{{ p }}" {% if p in recommendation.products %}checked{% endif %}> {{ p }}</label>
               {% endfor %}
             {% endif %}
-            <label>Actions — each must name the claims it rests on, e.g. “C12, C40”</label>
+            <label>Actions — each must name the claims (C) or observations (O) it rests on, e.g. “C12, O40”</label>
             {% for a in action_rows %}
               <div class="card" style="padding:10px;margin:6px 0">
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                   <select name="owner_{{ forloop.counter0 }}">
                     {% for o in owners %}<option value="{{ o }}" {% if o == a.owner %}selected{% endif %}>{{ o }}</option>{% endfor %}
                   </select>
-                  <input type="text" name="claims_{{ forloop.counter0 }}" value="{{ a.claims }}" placeholder="C12, C40" style="width:140px">
+                  <input type="text" name="claims_{{ forloop.counter0 }}" value="{{ a.claims }}" placeholder="C12, O40" style="width:140px">
                 </div>
                 <textarea name="action_{{ forloop.counter0 }}" placeholder="The action" style="min-height:50px;margin-top:6px">{{ a.action }}</textarea>
                 <input type="text" name="measure_{{ forloop.counter0 }}" value="{{ a.success_measure }}" placeholder="Success looks like…" style="margin-top:6px">

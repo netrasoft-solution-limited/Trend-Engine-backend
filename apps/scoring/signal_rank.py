@@ -17,6 +17,7 @@ row is shared; this row is not.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from django.db import transaction
 from django.utils import timezone
@@ -54,7 +55,10 @@ def components_for(signal: Signal, rows: list[ClaimRelevance]) -> tuple[dict, li
         for match in row.matches or []:
             key = (match["facet"], match["name"])
             entry = matches.setdefault(key, {**match, "claim_ids": []})
-            entry["claim_ids"].append(row.claim_id)
+            if getattr(row, "observation_id", None):
+                entry.setdefault("observation_ids", []).append(row.observation_id)
+            else:
+                entry["claim_ids"].append(row.claim_id)
 
     def named(facet: str) -> str:
         names = sorted({m["name"] for m in matches.values() if _facet_group(m["facet"]) == facet})
@@ -64,7 +68,11 @@ def components_for(signal: Signal, rows: list[ClaimRelevance]) -> tuple[dict, li
         "domain": {
             "value": signal.domain_score,
             "weight": RANK_WEIGHTS["domain"],
-            "detail": "The signal's own score — the same for every client.",
+            "detail": (
+                "Started by an analyst from observations: no movement is measured, so this "
+                "part is zero." if signal.origin == Signal.Origin.ANALYST
+                else "The signal's own score — the same for every client."
+            ),
         },
         "asset": {
             "value": best["asset"],
@@ -83,6 +91,34 @@ def components_for(signal: Signal, rows: list[ClaimRelevance]) -> tuple[dict, li
         },
     }
     return components, sorted(matches.values(), key=lambda m: (-m["weight"], m["name"]))
+
+
+@dataclass
+class ObservationRelevance:
+    """An attached observation scored like a claim, against the same profile."""
+
+    observation_id: int
+    asset_component: int
+    audience_component: int
+    priority_component: int
+    matches: list[dict]
+    claim_id: None = None
+
+
+def observation_rows(signal: Signal, profile) -> list[ObservationRelevance]:
+    rows = []
+    for link in signal.observations.filter(role=SignalEvidence.Role.SUPPORTS).select_related(
+        "observation"
+    ):
+        o = link.observation
+        text = " \n".join(part for part in (o.title, o.excerpt, o.topic) if part)
+        asset, asset_hits = relevance._component(profile.assets, text)
+        audience, audience_hits = relevance._component(profile.audiences, text)
+        priority, priority_hits = relevance._component(profile.priorities, text)
+        rows.append(ObservationRelevance(
+            o.pk, asset, audience, priority, asset_hits + audience_hits + priority_hits
+        ))
+    return rows
 
 
 def _facet_group(facet: str) -> str:
@@ -118,6 +154,7 @@ def rank_for(organization) -> dict:
         for row in ClaimRelevance.objects.filter(organization=organization, profile=profile)
     }
 
+    compiled = relevance.compile_profile(profile)
     now = timezone.now()
     ranked = 0
     signals = Signal.objects.filter(state__in=RANKABLE_STATES, is_illustrative=False)
@@ -126,6 +163,7 @@ def rank_for(organization) -> dict:
             signal=signal, role=SignalEvidence.Role.SUPPORTS
         ).values_list("claim_id", flat=True)
         rows = [by_claim[c] for c in claim_ids if c in by_claim]
+        rows += observation_rows(signal, compiled)
         components, matches = components_for(signal, rows)
         ClientSignalScore.objects.update_or_create(
             organization=organization,

@@ -176,3 +176,62 @@ def detach_observation(signal: Signal, observation_id: int, *, actor_label: str)
             f"{signal.code}: detached observation O{observation_id}",
             {"signal": signal.code, "observation": observation_id},
         )
+
+
+@transaction.atomic
+def start_from_observations(
+    *, title: str, statement: str, observation_ids: list[int], actor_label: str
+) -> tuple[Signal, list[int]]:
+    """A development an analyst starts from observations, as Mark's October
+    briefs were built. Returns (signal, observation numbers not found).
+
+    Its status is earned from the observations, never asserted: two or more
+    independent events in different weeks make it a recurring discussion,
+    anything less a watch item. It is never a measured trend, because nothing
+    here measures change over time.
+    """
+    from apps.evidence.models import Observation
+
+    from .detection import _next_code
+
+    title, statement = title.strip(), statement.strip()
+    if not title or not statement:
+        raise ReviewError("Give the development a title and a one-paragraph statement.")
+    found = list(Observation.objects.filter(pk__in=observation_ids))
+    if not found:
+        raise ReviewError("Start from at least one observation (by number, e.g. O12).")
+
+    events = {o.independence_key: o for o in found}
+    weeks = {
+        (o.published_at or o.observed_at).isocalendar()[:2]
+        for o in events.values() if (o.published_at or o.observed_at)
+    }
+    maturity = (
+        Signal.Maturity.RECURRING if len(events) >= 2 and len(weeks) >= 2
+        else Signal.Maturity.WATCH
+    )
+    signal = Signal.objects.create(
+        code=_next_code(),
+        title=title[:300],
+        statement=statement,
+        state=Signal.State.CANDIDATE,
+        maturity=maturity,
+        domain_score=0,
+        origin=Signal.Origin.ANALYST,
+        created_by_label=actor_label,
+        item_count=len(events),
+        creator_count=len(events),
+        source_count=len({o.source_type for o in found}),
+    )
+    attach_observations(
+        signal, [o.pk for o in found], role=SignalEvidence.Role.SUPPORTS,
+        actor_label=actor_label,
+    )
+    _audit(
+        actor_label,
+        f"{signal.code}: started from {len(found)} observation(s) "
+        f"({signal.get_maturity_display()})",
+        {"signal": signal.code, "observations": [o.pk for o in found],
+         "independent_events": len(events)},
+    )
+    return signal, [i for i in observation_ids if i not in {o.pk for o in found}]

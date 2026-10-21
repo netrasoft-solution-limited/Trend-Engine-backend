@@ -504,3 +504,39 @@ def test_an_observation_with_no_public_page_names_where_it_came_from(db):
         briefing.observation_line(o)
     )
     assert "](" not in briefing.observation_line(o)
+
+
+def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidence):
+    from datetime import date
+
+    from apps.evidence.models import Observation
+    from apps.intelligence import review
+    from apps.scoring.recommendations import ProposedAction
+
+    found = [
+        Observation.objects.create(
+            url=f"https://www.reddit.com/r/x/{d}", title="Which magnesium for sleep?",
+            source_type="reddit", observed_at=date(2026, 10, 20), published_at=date(2026, 10, d),
+            excerpt="Shopper asks about magnesium glycinate", entered_by="abu",
+        )
+        for d in (1, 9)
+    ]
+    signal, _ = review.start_from_observations(
+        title="Choosing a magnesium", statement="Shoppers ask which form to take.",
+        observation_ids=[o.pk for o in found], actor_label="abu",
+    )
+    rec = shared.draft(jarrow, signal, why_it_matters="Labels confuse shoppers.",
+                       limits="Targeted examples.", products=["Magnesium Glycinate"],
+                       actions=[ProposedAction(owner="Content/SEO", action="Write a label guide.",
+                                               success_measure="Visits.", claim_ids=[],
+                                               observation_ids=[found[0].pk])],
+                       )[0].recommendation
+    with scoped(jarrow):
+        recommendations.decide(rec, approve=True, actor_label="abu")
+    Signal.objects.filter(pk=signal.pk).update(state=Signal.State.APPROVED)
+
+    story = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}["Choosing a magnesium"]
+
+    assert "Status. Recurring discussion" in story
+    assert "an analyst-led story from 2 observation(s), 2 independent event(s)" in story
+    assert "[1]" in story and "[2]" in story

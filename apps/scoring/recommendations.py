@@ -68,6 +68,10 @@ class ProposedAction(BaseModel):
     action: str = Field(description="A specific thing to do in the next 14 days.")
     success_measure: str = Field(description="How the client will know it worked.")
     claim_ids: list[int] = Field(description="The claim numbers this action rests on.")
+    observation_ids: list[int] = Field(
+        default_factory=list,
+        description="The observation numbers (the digits of O-numbers) it rests on.",
+    )
 
 
 class ProposedRecommendation(BaseModel):
@@ -95,10 +99,16 @@ its numbered evidence. Write why this development matters to THIS brand and \
 what it should do in the next 14 days.
 
 Rules:
-- Ground everything in the numbered claims. Every action lists the claim \
-numbers it rests on, in its claim_ids field. Use only the numbers given. Do not \
-write claim numbers into the prose fields: the brand reads those sentences, and \
-the numbers mean nothing to them.
+- Ground everything in the numbered evidence: claims (C-numbers) and \
+analyst-entered observations (O-numbers). Every action lists the claim numbers \
+it rests on in claim_ids and the observation numbers in observation_ids; at \
+least one. Use only the numbers given. Do not write these numbers into the \
+prose fields: the brand reads those sentences, and the numbers mean nothing to \
+them.
+- Observations are targeted examples an analyst entered, not a sample. Keep each \
+figure's kind (a search estimate is a monthly average, a Shop count is a \
+lifetime total, engagement is cumulative), and treat advertisements and brand \
+content as marketing, not independent demand.
 - Name only products that appear in the brand's profile, exactly as written \
 there. Never suggest a product the brand does not list.
 - Actions are concrete and owned: content to write, a product page to change, \
@@ -149,7 +159,8 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
     evidence = list(
         SignalEvidence.objects.filter(signal=signal).select_related("claim__content_item__source")
     )
-    if not evidence:
+    observed = _observations(signal)
+    if not evidence and not observed:
         raise RecommendationError(f"{signal.code} has no evidence to recommend from.")
 
     llm = client or LLMClient()
@@ -160,7 +171,7 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
             purpose=ModelRun.Purpose.DRAFTING,
             prompt_version=PROMPT_VERSION,
             system=cached_system(f"{INSTRUCTIONS}\n\n## The category\n\n{domain_pack()}"),
-            user=_render(organization, profile, signal, evidence),
+            user=_render(organization, profile, signal, evidence, observed),
         )
     except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
         raise RecommendationError(f"Drafting failed: {exc}") from exc
@@ -172,6 +183,7 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
     content, validation = validate(
         proposed.model_dump(),
         allowed_claim_ids={e.claim_id for e in evidence},
+        allowed_observation_ids={link.observation_id for link in observed},
         product_names=list(profile.assets.values_list("name", flat=True)),
     )
     model_run = (
@@ -198,8 +210,13 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
     return Drafted(recommendation)
 
 
+def _observations(signal: Signal) -> list:
+    return list(signal.observations.select_related("observation").order_by("added_at"))
+
+
 def validate(
-    raw: dict, *, allowed_claim_ids: set[int], product_names: list[str]
+    raw: dict, *, allowed_claim_ids: set[int], product_names: list[str],
+    allowed_observation_ids: set[int] = frozenset(),
 ) -> tuple[dict, dict]:
     """Keep what is grounded; record what was not. Used for drafts AND edits.
 
@@ -208,15 +225,21 @@ def validate(
     review queue looking like analysis.
     """
     canonical = {name.lower(): name for name in product_names}
-    validation = {"invented_claim_ids": [], "uncited_actions": 0, "unknown_products": []}
+    validation = {"invented_claim_ids": [], "invented_observation_ids": [],
+                  "uncited_actions": 0, "unknown_products": []}
 
     actions = []
     for action in (raw.get("actions") or [])[:MAX_ACTIONS]:
         ids = list(dict.fromkeys(action.get("claim_ids") or []))
         kept = [i for i in ids if i in allowed_claim_ids]
         validation["invented_claim_ids"] += [i for i in ids if i not in allowed_claim_ids]
+        obs = list(dict.fromkeys(action.get("observation_ids") or []))
+        kept_obs = [i for i in obs if i in allowed_observation_ids]
+        validation["invented_observation_ids"] += [
+            i for i in obs if i not in allowed_observation_ids
+        ]
         text = (action.get("action") or "").strip()
-        if not kept or not text:
+        if not (kept or kept_obs) or not text:
             validation["uncited_actions"] += 1
             continue
         owner = (action.get("owner") or "").strip()
@@ -226,12 +249,13 @@ def validate(
                 "action": text,
                 "success_measure": (action.get("success_measure") or "").strip(),
                 "claim_ids": kept,
+                "observation_ids": kept_obs,
             }
         )
     if not actions:
         raise RecommendationError(
-            "No action survived validation: every proposed action either cited no claim "
-            "from this signal's evidence or was empty."
+            "No action survived validation: every proposed action either cited nothing "
+            "from this signal's evidence (claims or observations) or was empty."
         )
 
     products = []
@@ -262,7 +286,9 @@ def validate(
     )
 
 
-def _render(organization, profile, signal: Signal, evidence: list[SignalEvidence]) -> str:
+def _render(
+    organization, profile, signal: Signal, evidence: list[SignalEvidence], observed=()
+) -> str:
     def rows(facet):
         return "\n".join(
             f"- {t.name} (weight {t.weight}){': ' + t.notes if t.notes else ''}"
@@ -308,8 +334,33 @@ def _render(organization, profile, signal: Signal, evidence: list[SignalEvidence
         f"{sum(1 for e in evidence if e.role == SignalEvidence.Role.CONTRADICTS)} claim(s) "
         f"disagree.\n"
         f"What in the brand's profile it touched: {matched}.\n\n"
-        f"## Evidence ({len(evidence)} claims)\n\n" + "\n".join(lines)
+        f"## Evidence ({len(evidence)} claims)\n\n" + ("\n".join(lines) or "(none)")
+        + _render_observations(signal, observed)
     )
+
+
+def _render_observations(signal: Signal, observed) -> str:
+    if not observed:
+        return ""
+    origin = (
+        "This development was started by an analyst from these observations; it was not "
+        "detected by automatic collection.\n\n" if signal.origin == Signal.Origin.ANALYST else ""
+    )
+    lines = []
+    for link in observed:
+        o = link.observation
+        figure = (
+            f" | figure: {o.metric_label or o.metric_value} ({o.get_metric_kind_display()})"
+            if o.metric_kind else ""
+        )
+        labels = f" | labels: {', '.join(o.labels)}" if o.labels else ""
+        lines.append(
+            f"O{o.pk} | {'CONTRADICTS' if link.role == 'contradicts' else 'supports'} | "
+            f"{o.get_source_type_display()} | \"{o.title}\" | "
+            f"{o.published_at or o.observed_at} | {o.excerpt}{figure}{labels}"
+            + (f" | limits: {o.limitations}" if o.limitations else "")
+        )
+    return f"\n\n## Observations ({len(observed)})\n\n{origin}" + "\n".join(lines)
 
 
 # ── Operator review ─────────────────────────────────────────────────────────
@@ -327,7 +378,12 @@ def edit(recommendation: Recommendation, raw: dict, *, actor_label: str) -> Reco
     allowed = set(evidence.values_list("claim_id", flat=True))
     assets = ClientAsset.objects.filter(profile=recommendation.profile)
     products = list(assets.values_list("name", flat=True)) if recommendation.profile_id else []
-    content, validation = validate(raw, allowed_claim_ids=allowed, product_names=products)
+    content, validation = validate(
+        raw, allowed_claim_ids=allowed, product_names=products,
+        allowed_observation_ids={
+            link.observation_id for link in _observations(recommendation.signal)
+        },
+    )
     for field, value in content.items():
         setattr(recommendation, field, value)
     recommendation.validation = validation

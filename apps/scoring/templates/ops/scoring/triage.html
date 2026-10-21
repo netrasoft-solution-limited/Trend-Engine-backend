@@ -60,6 +60,19 @@ how much it matters to them, how sure we are, and what has been decided.
         <button type="submit">Draft the brief from {{ approved_developments }} development(s)</button>
       </form>
     {% endif %}
+    <details style="margin-top:10px">
+      <summary>Start a development from observations</summary>
+      <p class="note">For an analyst-led story, like the October briefs: name it, say what is being discussed, and list the observations it rests on. It is labelled analyst-led everywhere and its status is earned from the observations (a recurring discussion needs two independent events in different weeks).</p>
+      <form method="post">{% csrf_token %}
+        <label for="dev-title">Title</label>
+        <input type="text" id="dev-title" name="title" placeholder="Protein that is easy to digest">
+        <label for="dev-statement">What is being discussed</label>
+        <textarea id="dev-statement" name="statement"></textarea>
+        <label for="dev-ids">Observations</label>
+        <input type="text" id="dev-ids" name="ids" placeholder="O1, O2, O3">
+        <div class="actions"><button type="submit" name="action" value="start" class="small">Start the development</button></div>
+      </form>
+    </details>
     <p class="note">
       Also for {{ organization.name }}:
       <a href="{% url 'ops-candidates' organization.slug %}">New-product candidates →</a> ·
@@ -91,7 +104,7 @@ how much it matters to them, how sure we are, and what has been decided.
             <tr>
               <td class="num"><b>{{ s.rank_score|default_if_none:"—" }}</b></td>
               <td>
-                <a href="{% url 'ops-signal' organization.slug s.code %}">{{ s.title }}</a>
+                <a href="{% url 'ops-signal' organization.slug s.code %}">{{ s.title }}</a>{% if s.origin == "analyst" %}<span class="pill illustrative">analyst-led</span>{% endif %}
                 {% if s.is_illustrative %}<span class="pill illustrative">illustrative</span>{% endif %}
                 {% if s.needs_scientific_routing %}<span class="pill">needs expert</span>{% endif %}
                 {% if not s.is_illustrative %}<span class="pill {% if s.maturity == 'measured_trend' %}live{% endif %}">{{ s.get_maturity_display }}</span>{% endif %}

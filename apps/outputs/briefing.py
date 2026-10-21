@@ -562,6 +562,15 @@ def _source_line(item: ContentItem) -> str:
 
 
 def _strength(signal: Signal) -> str:
+    if signal.origin == Signal.Origin.ANALYST:
+        observed = [link.observation for link in signal.observations.filter(role="supports")]
+        events = len({o.independence_key for o in observed})
+        kinds = sorted({o.get_source_type_display() for o in observed})
+        return (
+            f"Evidence strength: an analyst-led story from {len(observed)} observation(s), "
+            f"{events} independent event(s), across {', '.join(kinds) or 'no channel'}. "
+            f"Targeted examples, not a measured trend."
+        )
     cited = (
         SignalEvidence.objects.filter(
             signal=signal, role=SignalEvidence.Role.SUPPORTS, claim__is_cited=True

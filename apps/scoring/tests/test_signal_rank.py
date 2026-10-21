@@ -243,6 +243,7 @@ def test_what_is_not_grounded_is_removed_and_recorded(jarrow, evidence):
     assert rec.actions[1]["owner"] == "Brand", "an invented owner is not stored"
     assert rec.validation == {
         "invented_claim_ids": [999_999, 424_242],
+        "invented_observation_ids": [],
         "uncited_actions": 1,
         "unknown_products": ["AG1"],
     }

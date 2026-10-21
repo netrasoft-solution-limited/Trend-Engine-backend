@@ -107,6 +107,14 @@ class Signal(models.Model):
     item_count = models.PositiveSmallIntegerField(default=0)
 
     # ── Provenance ──────────────────────────────────────────────────────────
+    class Origin(models.TextChoices):
+        DETECTED = "detected", "Detected across collected sources"
+        ANALYST = "analyst", "Started by an analyst from observations"
+
+    #: Mark's delivered briefs were analyst-led; a development started from
+    #: observations says so everywhere it appears, and never claims detection.
+    origin = models.CharField(max_length=12, choices=Origin.choices, default=Origin.DETECTED)
+    created_by_label = models.CharField(max_length=200, blank=True)
     detected_by = models.ForeignKey(
         "enrichment.ModelRun",
         on_delete=models.SET_NULL,

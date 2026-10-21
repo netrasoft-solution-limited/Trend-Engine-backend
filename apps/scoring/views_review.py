@@ -152,6 +152,29 @@ class TriageView(View):
         organization = _organization(slug)
         back = redirect(reverse("ops-triage", args=[slug]))
 
+        if request.POST.get("action") == "start":
+            try:
+                signal, missing = review.start_from_observations(
+                    title=request.POST.get("title") or "",
+                    statement=request.POST.get("statement") or "",
+                    observation_ids=review.parse_observation_ids(request.POST.get("ids") or ""),
+                    actor_label=_actor(request),
+                )
+            except review.ReviewError as exc:
+                messages.error(request, str(exc))
+                return back
+            if missing:
+                messages.warning(
+                    request, "No observation " + ", ".join(f"O{m}" for m in missing) + "."
+                )
+            with scoped(organization):
+                signal_rank.rank_for(organization)
+            messages.success(
+                request, f"Started {signal.code} ({signal.get_maturity_display().lower()}). "
+                f"Review it, then draft {organization.name}'s recommendation."
+            )
+            return redirect(reverse("ops-signal", args=[slug, signal.code]))
+
         if request.POST.get("action") == "detect":
             result = detection.detect()
             if result.skipped:
@@ -393,7 +416,10 @@ def _components(stored: dict, weights: dict) -> list[dict]:
 
 def _action_rows(recommendation) -> list[dict]:
     rows = [
-        {**a, "claims": ", ".join(f"C{i}" for i in a.get("claim_ids", []))}
+        {**a, "claims": ", ".join(
+            [f"C{i}" for i in a.get("claim_ids", [])]
+            + [f"O{i}" for i in a.get("observation_ids", [])]
+        )}
         for a in (recommendation.actions if recommendation else [])
     ]
     if recommendation and len(rows) < recommendations.MAX_ACTIONS:
@@ -414,7 +440,11 @@ def _parse_edit(post) -> dict:
                 "owner": post.get(f"owner_{i}") or "",
                 "action": text,
                 "success_measure": post.get(f"measure_{i}") or "",
-                "claim_ids": [int(n) for n in re.findall(r"\d+", post.get(f"claims_{i}") or "")],
+                # "C12, O40": claims by C (or a bare number), observations by O.
+                "claim_ids": [int(n) for p, n in re.findall(r"([CcOo]?)(\d+)",
+                              post.get(f"claims_{i}") or "") if p.lower() != "o"],
+                "observation_ids": [int(n) for p, n in re.findall(r"([CcOo]?)(\d+)",
+                                    post.get(f"claims_{i}") or "") if p.lower() == "o"],
             }
         )
     return {
@@ -431,6 +461,11 @@ def _describe(validation: dict) -> str:
         parts.append(
             "claim number(s) not in this signal's evidence: "
             + ", ".join(f"C{i}" for i in validation["invented_claim_ids"])
+        )
+    if validation.get("invented_observation_ids"):
+        parts.append(
+            "observation number(s) not attached to this signal: "
+            + ", ".join(f"O{i}" for i in validation["invented_observation_ids"])
         )
     if validation.get("uncited_actions"):
         parts.append(f"{validation['uncited_actions']} action(s) citing no evidence")
