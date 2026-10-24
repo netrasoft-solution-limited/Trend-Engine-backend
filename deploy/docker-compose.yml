@@ -25,7 +25,10 @@ x-django: &django
 services:
   # ── Edge ──────────────────────────────────────────────────────────────────
   caddy:
-    image: caddy:2-alpine
+    image: trend-engine-caddy:security-20261024
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     ports: ["80:80", "443:443"]
     environment:
       # Both names must resolve to this host before Caddy can issue a
@@ -122,7 +125,10 @@ services:
 
   # ── Data ──────────────────────────────────────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg16
+    image: trend-engine-postgres:security-20261024
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     env_file: [.env]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -142,7 +148,10 @@ services:
     # blunt about it — an untested backup is not a backup.
 
   redis:
-    image: redis:7-alpine
+    image: trend-engine-redis:security-20261024
+    build:
+      context: .
+      dockerfile: Dockerfile.redis
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redisdata:/data

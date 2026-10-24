@@ -1,0 +1,6 @@
+FROM caddy:2.11.7-builder AS builder
+ENV GOTOOLCHAIN=go1.27.3 GOMAXPROCS=2
+RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.60.0 --replace github.com/go-chi/chi/v5=github.com/go-chi/chi/v5@v5.4.0
+FROM caddy:2.11.7-alpine
+RUN apk upgrade --no-cache
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

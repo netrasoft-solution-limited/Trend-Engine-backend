@@ -16,6 +16,7 @@ ENV PYTHONUNBUFFERED=1 \
 # fail every night with an error nobody would see until a restore was needed.
 # The version here must track the `pgvector/pgvector:pg16` server image.
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends libpq5 curl ca-certificates gnupg \
  && install -d /usr/share/postgresql-common/pgdg \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
