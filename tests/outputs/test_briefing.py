@@ -561,7 +561,8 @@ def test_the_package_never_asks_for_an_invented_expert_voice():
 
 def test_an_invented_experience_is_flagged_for_the_reviewer_not_rewritten(jarrow, approved):
     llm = writing(article_draft="Few questions come up as often in my conversations about "
-                                "protein. Recommended by doctors everywhere.")
+                                "protein. Recommended by doctors everywhere.",
+                  email_body="The guide has been reviewed by our specialist.")
 
     with scoped(jarrow):
         sections, _, _ = content_brief.sections_for(jarrow, approved, client=llm)
@@ -569,6 +570,7 @@ def test_an_invented_experience_is_flagged_for_the_reviewer_not_rewritten(jarrow
     assert sections[0]["heading"] == "Review flags"
     assert "“in my conversations”" in sections[0]["text"]
     assert "“Recommended by doctors”" in sections[0]["text"]
+    assert "Email draft: “has been reviewed by”" in sections[0]["text"]
     article = next(s for s in sections if s["heading"].startswith("Article draft"))
     assert "in my conversations" in article["text"], "flagged, never silently rewritten"
 

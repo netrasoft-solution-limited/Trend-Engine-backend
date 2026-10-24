@@ -40,7 +40,7 @@ from apps.scoring.models import Recommendation
 from . import briefing
 from .services import DraftingError
 
-PROMPT_VERSION = "content-package/2026-10-24"
+PROMPT_VERSION = "content-package/2026-10-24b"
 
 ALWAYS = (
     "No efficacy, dosage or health claim is published without Scientific/Legal "
@@ -124,7 +124,9 @@ patients/clients", "I often see", "as a dietitian I…".
 no gender, no credentials that have not been supplied.
 - Never imply that any person, expert, publisher or institution endorses the brand or \
 its products. A source discussing a topic is not endorsing anything.
-- Describe what sources said only as the evidence shows; no invented quotes."""
+- Describe what sources said only as the evidence shows; no invented quotes.
+- Never say the content has been reviewed, checked or approved by anyone: that \
+review has not happened yet, and the reviewer adds such a line themselves."""
 
 
 def sections_for(organization, recommendation: Recommendation, *, client=None):
@@ -265,6 +267,9 @@ VOICE_FLAGS = (
     r"\bmy (?:patients|clients)\b",
     r"\bI (?:often|regularly|frequently|always) (?:see|hear|recommend|tell)\b",
     r"\bas an? (?:doctor|dietitian|nutritionist|physician|pharmacist|clinician)\b",
+    r"\b(?:has|have) been (?:reviewed|checked|approved|vetted) by\b",
+    r"\b(?:reviewed|checked|approved|vetted) by (?:our|a|an) "
+    r"(?:specialist|expert|dietitian|doctor|nutritionist)\b",
     r"\b(?:recommended|endorsed|approved|trusted) by "
     r"(?:doctors|experts|dietitians|nutritionists)\b",
 )
