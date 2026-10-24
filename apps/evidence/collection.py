@@ -85,7 +85,11 @@ def _youtube(source: Source, limit: int) -> list[dict]:
         return connector.fetch_by_url(urls[:limit])
     if channels:
         return connector.fetch_channels(channels, max_results=limit)
-    return connector.search(queries, max_results=limit)
+    # "month" is YouTube's last-30-days upload filter: the rolling window every
+    # brief states. A source may set `date_filter` ("week", "year", or "" for none).
+    return connector.search(
+        queries, max_results=limit, date_filter=config.get("date_filter", "month")
+    )
 
 
 def _unbuilt(route: str) -> Callable[[Source, int], list[dict]]:

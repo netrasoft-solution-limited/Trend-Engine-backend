@@ -151,7 +151,8 @@ class ApifyActorConnector(BaseConnector):
         )
 
     def search(
-        self, queries: list[str], *, max_results: int = 10, timeout: float = 280.0
+        self, queries: list[str], *, max_results: int = 10, timeout: float = 280.0,
+        date_filter: str = "month",
     ) -> list[dict]:
         """Run the Actor and return its dataset rows, normalised.
 
@@ -163,6 +164,10 @@ class ApifyActorConnector(BaseConnector):
             **self.config.input_template,
             "searchQueries": queries,
             "maxResults": max_results,
+            # The rolling research window (Mark, 24 Oct). Without it a search
+            # returns the same all-time top videos on every poll, and nothing
+            # new is ever collected. Relevance order within the window.
+            **({"dateFilter": date_filter} if date_filter else {}),
         }
         rows = self._run(payload, timeout=timeout)
         return [self._normalise(row) for row in rows]

@@ -209,3 +209,15 @@ def test_the_build_is_pinned_in_the_request(ok_connector):
     url = str(ok_connector.handler.seen.url)
     assert f"build={YOUTUBE.build}" in url
     assert YOUTUBE.actor in url
+
+
+def test_a_search_is_limited_to_the_rolling_30_day_window(ok_connector):
+    """Found 24 Oct: without an upload-date filter every poll returned the same
+    all-time top videos, so nothing new was collected."""
+    import json
+
+    ok_connector.search(["creatine"])
+    assert json.loads(ok_connector.handler.seen.content)["dateFilter"] == "month"
+
+    ok_connector.search(["creatine"], date_filter="")
+    assert "dateFilter" not in json.loads(ok_connector.handler.seen.content)
