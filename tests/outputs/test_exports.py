@@ -420,6 +420,26 @@ def test_the_docx_carries_the_draft_notice():
     assert any(exports.DRAFT_NOTICE in p.text for p in opened.paragraphs)
 
 
+def pdf_text(content: bytes) -> bytes:
+    """The PDF's bytes with every Flate stream inflated alongside.
+
+    Newer WeasyPrint packs page and font objects into compressed object streams,
+    so `/Type /Page` and `/FontFile` are no longer in the raw bytes. Searching the
+    inflated streams keeps these checks true to the file without adding a PDF
+    parsing dependency.
+    """
+    import re
+    import zlib
+
+    parts = [content]
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", content, re.S):
+        try:
+            parts.append(zlib.decompress(match.group(1)))
+        except zlib.error:
+            continue  # images and other non-Flate streams
+    return b"\n".join(parts)
+
+
 @requires_pdf
 def test_a_pdf_renders_twice_to_identical_bytes():
     """A PDF embeds /CreationDate, /ModDate and a document /ID, all of which
@@ -433,9 +453,10 @@ def test_a_pdf_renders_twice_to_identical_bytes():
 @requires_pdf
 def test_the_pdf_is_a_pdf_with_pages():
     rendered = exports.render(doc(), "pdf")
+    text = pdf_text(rendered.content)
 
     assert rendered.content.startswith(b"%PDF-")
-    assert b"/Type /Page" in rendered.content or b"/Type/Page" in rendered.content
+    assert b"/Type /Page" in text or b"/Type/Page" in text
 
 
 @requires_pdf
@@ -444,9 +465,9 @@ def test_the_pdf_embeds_a_font_covering_the_punctuation_this_content_uses():
     no font package they render as empty boxes — the PDF succeeds and looks
     broken, which is the harder fault to notice. An embedded font descriptor is
     the evidence that something was available to draw them."""
-    content = exports.render(doc(), "pdf").content
+    text = pdf_text(exports.render(doc(), "pdf").content)
 
-    assert b"/FontFile" in content or b"/BaseFont" in content
+    assert b"/FontFile" in text or b"/BaseFont" in text
 
 
 @requires_pdf
