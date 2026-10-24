@@ -1,0 +1,56 @@
+{% extends "ops/base.html" %}
+{% block title %}Expert reviewers{% endblock %}
+{% block content %}
+  <p class="note"><a href="{% url 'ops-outputs' %}">← Outputs</a></p>
+  <h1>Expert reviewers</h1>
+  <p class="lede">
+    The experts who may sign off health and scientific outputs before publication. A sign-off
+    must name an active reviewer from this list, and the operator recording it cannot be that
+    reviewer. Drafting and internal approval do not need a reviewer; only publication does.
+  </p>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Qualification</th><th>Email</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for r in reviewers %}
+            <tr>
+              <td>{{ r.name }}</td>
+              <td class="muted">{{ r.qualification }}</td>
+              <td class="muted">{{ r.email }}</td>
+              <td>{% if r.is_active %}<span class="pill live">active</span>{% else %}<span class="pill">inactive</span>{% endif %}</td>
+              <td>
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="reviewer" value="{{ r.pk }}">
+                  {% if r.is_active %}
+                    <button type="submit" name="action" value="deactivate" class="small danger">Deactivate</button>
+                  {% else %}
+                    <button type="submit" name="action" value="reactivate" class="small secondary">Reactivate</button>
+                  {% endif %}
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="empty">No reviewer registered yet. Outputs can be drafted and approved internally, but health briefs cannot be published until one is added.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Deactivating keeps past sign-offs on record; a reviewer is never deleted.</p>
+  </div>
+
+  <div class="card">
+    <span class="name">Add a reviewer</span>
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required placeholder="Dr Jane Doe">
+      <label for="qualification">Qualification</label>
+      <input type="text" id="qualification" name="qualification" required placeholder="Registered dietitian; PhD nutrition science">
+      <label for="email">Email</label>
+      <input type="text" id="email" name="email" required placeholder="jane@example.com">
+      <div class="actions"><button type="submit" name="action" value="add">Add reviewer</button></div>
+    </form>
+  </div>
+{% endblock %}

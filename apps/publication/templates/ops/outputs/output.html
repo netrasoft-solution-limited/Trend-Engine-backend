@@ -77,6 +77,7 @@
             <p class="note state unreadable">
               No expert reviewer is registered, so this cannot be signed off yet. A sign-off
               must name a registered reviewer, and not the operator recording it.
+              <a href="{% url 'ops-reviewers' %}?next={{ request.path|urlencode }}">Add a reviewer →</a>
             </p>
           {% endif %}
           <label for="discipline">Discipline</label>

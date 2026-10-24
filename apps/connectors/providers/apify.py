@@ -67,9 +67,14 @@ class ActorConfig:
 #: `streamers/youtube-scraper` — 27M runs, the dominant YouTube Actor.
 #: Price is the BRONZE tier rate; FREE is $0.004. Verified against the live
 #: store listing on 2026-09-30.
+#:
+#: The build is the maintainer's "latest" TAG, not a number. A pinned number
+#: (0.0.303) was deleted by the maintainer within three weeks and every run
+#: failed from 19 Oct; the tag always names their current stable build. The
+#: field map below is checked against a live run whenever this changes.
 YOUTUBE = ActorConfig(
     actor="streamers~youtube-scraper",
-    build="0.0.303",
+    build="latest",
     price_per_result_usd=Decimal("0.004"),
     input_template={
         "downloadSubtitles": True,

@@ -40,7 +40,7 @@ from apps.scoring.models import Recommendation
 from . import briefing
 from .services import DraftingError
 
-PROMPT_VERSION = "content-package/2026-10-21"
+PROMPT_VERSION = "content-package/2026-10-24"
 
 ALWAYS = (
     "No efficacy, dosage or health claim is published without Scientific/Legal "
@@ -107,13 +107,24 @@ empty list — do not stretch a claim to fit.
 - Guardrails name what this specific evidence does not support saying.
 
 Then draft the package that follows from it, all as drafts for Scientific Affairs review:
-- the article in the expert's voice (structure/function language only; no disease \
-claims — treat, cure, prevent, reverse; products never in the body of the article)
+- the article, drafted for the reviewing specialist to edit and sign (structure/function \
+language only; no disease claims — treat, cure, prevent, reverse; products never in \
+the body of the article)
 - product-page FAQs, only for the products in the recommendation, staying within \
 what the product's label and published description already say
 - a short video script, an email (subject, body, button) and social posts
 - the questions people ask AI assistants that this content answers, and what to \
-measure after it runs."""
+measure after it runs.
+
+Voice and endorsement — these drafts go out under a real person's name later, so:
+- Write in a neutral voice, never the first person. Never invent experience the \
+specialist has not told us about: no "in my practice", "in my conversations", "my \
+patients/clients", "I often see", "as a dietitian I…".
+- Refer to the reviewer only as "our specialist" or "the reviewing expert": no name, \
+no gender, no credentials that have not been supplied.
+- Never imply that any person, expert, publisher or institution endorses the brand or \
+its products. A source discussing a topic is not endorsing anything.
+- Describe what sources said only as the evidence shows; no invented quotes."""
 
 
 def sections_for(organization, recommendation: Recommendation, *, client=None):
@@ -236,7 +247,39 @@ def sections_for(organization, recommendation: Recommendation, *, client=None):
             ),
         },
     ]
+    flags = voice_flags(sections)
+    if flags:
+        sections.insert(0, {
+            "heading": "Review flags",
+            "text": "Fix before review: these phrases invent the specialist's experience or "
+            "imply an endorsement.\n" + "\n".join(f"· {f}" for f in flags),
+        })
     return sections, draft.working_title.strip(), (profile.citation if profile else "")
+
+
+#: Phrases that invent the specialist's experience or imply an endorsement. The
+#: prompt forbids them; this catches a draft that slips, and flags it for the
+#: reviewer rather than rewriting it silently.
+VOICE_FLAGS = (
+    r"\bin my (?:practice|clinic|conversations?|experience|work)\b",
+    r"\bmy (?:patients|clients)\b",
+    r"\bI (?:often|regularly|frequently|always) (?:see|hear|recommend|tell)\b",
+    r"\bas an? (?:doctor|dietitian|nutritionist|physician|pharmacist|clinician)\b",
+    r"\b(?:recommended|endorsed|approved|trusted) by "
+    r"(?:doctors|experts|dietitians|nutritionists)\b",
+)
+
+
+def voice_flags(sections: list[dict]) -> list[str]:
+    """Each flagged phrase, quoted with the section it is in."""
+    import re
+
+    found = []
+    for section in sections:
+        for pattern in VOICE_FLAGS:
+            for match in re.finditer(pattern, section["text"], flags=re.IGNORECASE):
+                found.append(f"{section['heading']}: “{match.group(0)}”")
+    return found
 
 
 DRAFT_LABEL = (

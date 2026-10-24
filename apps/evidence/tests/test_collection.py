@@ -221,3 +221,30 @@ def test_a_youtube_source_can_follow_channels(policy, monkeypatch):
 
     assert collect(source) == [{"external_id": "vid-1"}]
     assert seen == {"channels": ["https://www.youtube.com/@hubermanlab"], "max_results": 3}
+
+
+def test_a_blocking_connector_error_goes_to_an_operator_not_a_retry(podcast, monkeypatch):
+    """Found 23 Oct: Apify deleted the pinned build, and the YouTube sources
+    retried a 403 every three minutes instead of stopping."""
+    from apps.connectors.providers.apify import ApifyError
+
+    def removed_build(source, limit):
+        raise ApifyError('returned 403: Build with number "0.0.303" was not found.',
+                         blocking=True)
+
+    monkeypatch.setitem(collection.COLLECTORS, podcast.route, removed_build)
+
+    with pytest.raises(NotCollectable, match="0.0.303"):
+        collect(podcast)
+
+
+def test_a_passing_vendor_error_still_retries(podcast, monkeypatch):
+    from apps.connectors.providers.apify import ApifyError
+
+    def outage(source, limit):
+        raise ApifyError("returned 503", blocking=False)
+
+    monkeypatch.setitem(collection.COLLECTORS, podcast.route, outage)
+
+    with pytest.raises(ApifyError):
+        collect(podcast)

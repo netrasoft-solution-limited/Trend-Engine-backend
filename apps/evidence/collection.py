@@ -127,6 +127,14 @@ def collect(source: Source, *, limit: int = DEFAULT_LIMIT) -> list[dict]:
     if collector is None:
         raise NotCollectable(f"Unknown route {source.route!r} on {source.name}.")
 
-    rows = collector(source, min(limit, int(source.config.get("limit") or limit)))
+    try:
+        rows = collector(source, min(limit, int(source.config.get("limit") or limit)))
+    except Exception as exc:
+        # A connector that marks its error blocking (auth, payment, a removed
+        # build) will fail the same way every time: retrying it every few
+        # minutes only fills the run log. It goes to an operator instead.
+        if getattr(exc, "blocking", False):
+            raise NotCollectable(f"{source.name}: {exc}") from exc
+        raise
     logger.info("Collected %s items from %s", len(rows), source.name)
     return rows

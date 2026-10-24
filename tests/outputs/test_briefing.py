@@ -549,3 +549,34 @@ def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidenc
     assert "between 1 October and 9 October 2026" in sections["About this brief"], (
         "a checked date does not stretch the window"
     )
+
+
+
+def test_the_package_never_asks_for_an_invented_expert_voice():
+    rules = content_brief.INSTRUCTIONS
+
+    assert "expert's voice" not in rules
+    assert "never the first person" in rules and "endorses the brand" in rules
+
+
+def test_an_invented_experience_is_flagged_for_the_reviewer_not_rewritten(jarrow, approved):
+    llm = writing(article_draft="Few questions come up as often in my conversations about "
+                                "protein. Recommended by doctors everywhere.")
+
+    with scoped(jarrow):
+        sections, _, _ = content_brief.sections_for(jarrow, approved, client=llm)
+
+    assert sections[0]["heading"] == "Review flags"
+    assert "“in my conversations”" in sections[0]["text"]
+    assert "“Recommended by doctors”" in sections[0]["text"]
+    article = next(s for s in sections if s["heading"].startswith("Article draft"))
+    assert "in my conversations" in article["text"], "flagged, never silently rewritten"
+
+
+def test_a_neutral_package_carries_no_flags(jarrow, approved):
+    with scoped(jarrow):
+        sections, _, _ = content_brief.sections_for(
+            jarrow, approved, client=writing(article_draft="Bloating has many causes.")
+        )
+
+    assert all(s["heading"] != "Review flags" for s in sections)

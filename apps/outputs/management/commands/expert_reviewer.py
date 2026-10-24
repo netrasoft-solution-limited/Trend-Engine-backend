@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.operations.models import AuditEvent
+from apps.outputs import reviewers
 from apps.outputs.models import ExpertReviewer
 
 
@@ -36,34 +36,22 @@ class Command(BaseCommand):
 
         if not options["email"]:
             raise CommandError("--email is required.")
-
-        if action == "add":
-            if not (options["name"] and options["qualification"]):
-                raise CommandError("`add` needs --name, --qualification and --email.")
-            reviewer, created = ExpertReviewer.objects.get_or_create(
-                email=options["email"].strip().lower(),
-                defaults={
-                    "name": options["name"].strip(),
-                    "qualification": options["qualification"].strip(),
-                    "added_by_label": options["actor"],
-                },
-            )
-            if not created:
-                raise CommandError(f"{reviewer.email} is already registered.")
-            message = f"Registered expert reviewer {reviewer.name} ({reviewer.qualification})"
-        else:
-            reviewer = ExpertReviewer.objects.filter(email=options["email"].strip().lower()).first()
-            if reviewer is None:
-                raise CommandError(f"No reviewer {options['email']}.")
-            reviewer.is_active = False
-            reviewer.save(update_fields=["is_active"])
-            message = f"Deactivated expert reviewer {reviewer.name}"
-
-        AuditEvent.objects.create(
-            kind=AuditEvent.Kind.CONFIG,
-            actor_realm=AuditEvent.Realm.OPERATOR,
-            actor_label=options["actor"] or "expert_reviewer command",
-            message=message,
-            context={"email": reviewer.email},
-        )
+        actor = options["actor"] or "expert_reviewer command"
+        try:
+            if action == "add":
+                reviewer = reviewers.register(
+                    name=options["name"] or "", qualification=options["qualification"] or "",
+                    email=options["email"], actor_label=actor,
+                )
+                message = f"Registered expert reviewer {reviewer.name} ({reviewer.qualification})"
+            else:
+                reviewer = ExpertReviewer.objects.filter(
+                    email=options["email"].strip().lower()
+                ).first()
+                if reviewer is None:
+                    raise CommandError(f"No reviewer {options['email']}.")
+                reviewers.set_active(reviewer, False, actor_label=actor)
+                message = f"Deactivated expert reviewer {reviewer.name}"
+        except reviewers.ReviewerError as exc:
+            raise CommandError(str(exc)) from exc
         self.stdout.write(self.style.SUCCESS(message))

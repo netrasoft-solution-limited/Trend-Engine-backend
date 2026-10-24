@@ -5,10 +5,11 @@ withdraw and deliver — the gate — which is a layer above outputs.
 """
 from django.urls import path
 
-from . import views
+from . import views, views_reviewers
 
 urlpatterns = [
     path("", views.OutputListView.as_view(), name="ops-outputs"),
+    path("reviewers/", views_reviewers.ReviewerListView.as_view(), name="ops-reviewers"),
     path("<int:pk>/", views.OutputDetailView.as_view(), name="ops-output"),
     path("<int:pk>/signoff/", views.OutputSignoffView.as_view(), name="ops-output-signoff"),
     path("<int:pk>/withdraw/", views.OutputWithdrawView.as_view(), name="ops-output-withdraw"),
