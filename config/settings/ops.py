@@ -88,3 +88,9 @@ OPERATOR_MFA_MAX_ATTEMPTS_PER_IP = 40
 #: than the domain, so someone holding codes for several environments can tell
 #: them apart.
 OPERATOR_MFA_ISSUER = env("OPERATOR_MFA_ISSUER", "Trend Engine")
+
+# The red banner on every operator page: collection or AI calls failing now.
+TEMPLATES[0]["OPTIONS"]["context_processors"] = [  # noqa: F405
+    *TEMPLATES[0]["OPTIONS"]["context_processors"],  # noqa: F405
+    "apps.scoring.context_processors.ops_alerts",
+]

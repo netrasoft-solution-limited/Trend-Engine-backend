@@ -273,3 +273,74 @@ def test_the_opportunity_brief_drafts_from_approved_candidates(client, admin, re
         version = output.versions.get()
     assert output.client_profile_version
     assert any(s["heading"].startswith("Candidate 1: Spermidine") for s in version.body)
+
+
+# ── Regenerate and edit (Mark, 24 Oct) ──────────────────────────────────────
+
+
+def _drafted(client, organization):
+    _draft(client, organization)
+    with operator_scope():
+        return Output.objects.get(type=OutputType.TREND_BRIEF)
+
+
+def test_regenerating_adds_a_version_and_keeps_the_earlier_one(
+    client, admin, real_client, approved
+):
+    client.force_login(admin)
+    output = _drafted(client, real_client)
+    with scoped(real_client):
+        first = output.versions.get(number=1)
+        client.post(reverse("ops-output-approve", args=[output.pk, 1]))
+
+    page = client.post(reverse("ops-output-regenerate", args=[output.pk]), follow=True)
+
+    assert "v2 drafted from current evidence" in page.content.decode()
+    with scoped(real_client):
+        first.refresh_from_db()
+        assert first.state == "approved", "the approved version is untouched"
+        assert output.versions.get(number=2).state == "draft"
+
+
+def test_editing_saves_a_new_version_and_never_overwrites(client, admin, real_client, approved):
+    client.force_login(admin)
+    output = _drafted(client, real_client)
+    with scoped(real_client):
+        body = output.versions.get(number=1).body
+    data = {f"heading_{i}": s["heading"] for i, s in enumerate(body)}
+    data.update({f"text_{i}": s["text"] for i, s in enumerate(body)})
+    data["text_0"] = "An edited opening."
+    data["remove_1"] = "1"
+
+    page = client.post(reverse("ops-output-edit", args=[output.pk, 1]), data, follow=True)
+
+    assert "Saved as v2. v1 is unchanged." in page.content.decode()
+    with scoped(real_client):
+        assert output.versions.get(number=1).body == body
+        edited = output.versions.get(number=2).body
+    assert edited[0]["text"] == "An edited opening."
+    assert len(edited) == len(body) - 1
+
+
+def test_saving_without_changes_makes_no_version(client, admin, real_client, approved):
+    client.force_login(admin)
+    output = _drafted(client, real_client)
+    with scoped(real_client):
+        body = output.versions.get(number=1).body
+    data = {f"heading_{i}": s["heading"] for i, s in enumerate(body)}
+    data.update({f"text_{i}": s["text"] for i, s in enumerate(body)})
+
+    client.post(reverse("ops-output-edit", args=[output.pk, 1]), data)
+
+    with scoped(real_client):
+        assert output.versions.count() == 1
+
+
+def test_a_download_from_the_page_is_listed_under_downloads(client, admin, real_client, approved):
+    client.force_login(admin)
+    output = _drafted(client, real_client)
+
+    client.get(reverse("ops-output-export", args=[output.pk, 1, "markdown"]))
+    page = client.get(reverse("ops-output", args=[output.pk])).content.decode()
+
+    assert "Downloads" in page and "MARKDOWN" in page and "watermarked DRAFT" in page

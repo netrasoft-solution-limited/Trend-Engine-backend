@@ -1,0 +1,25 @@
+{% extends "ops/base.html" %}
+{% block title %}Edit v{{ version.number }} · {{ output.title }}{% endblock %}
+{% block content %}
+  <p class="note"><a href="{% url 'ops-output' output.pk %}">← {{ output.title }}</a></p>
+  <h1>v{{ version.number }} <span class="pill">{{ version.get_state_display|lower }}</span></h1>
+  <p class="lede">
+    Read or edit each section. Saving creates v-next as a draft; v{{ version.number }} stays
+    exactly as it is. Formatting: a blank line starts a paragraph, a line starting with “·” is a
+    bullet, lines starting with “|” form a table, and links are written [label](https://…).
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {% for i, section in sections %}
+      <div class="card">
+        <input type="text" name="heading_{{ i }}" value="{{ section.heading }}" style="font-weight:620">
+        <textarea name="text_{{ i }}" rows="{% if section.text|length > 1500 %}22{% elif section.text|length > 500 %}12{% else %}6{% endif %}" style="margin-top:8px;font-size:14px">{{ section.text }}</textarea>
+        <label class="check" style="margin-top:6px"><input type="checkbox" name="remove_{{ i }}" value="1"> Remove this section</label>
+      </div>
+    {% endfor %}
+    <div class="actions">
+      <button type="submit">Save as a new version</button>
+      <a href="{% url 'ops-output' output.pk %}">Cancel</a>
+    </div>
+  </form>
+{% endblock %}

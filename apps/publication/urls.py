@@ -12,6 +12,10 @@ urlpatterns = [
     path("reviewers/", views_reviewers.ReviewerListView.as_view(), name="ops-reviewers"),
     path("<int:pk>/", views.OutputDetailView.as_view(), name="ops-output"),
     path("<int:pk>/signoff/", views.OutputSignoffView.as_view(), name="ops-output-signoff"),
+    path(
+        "<int:pk>/regenerate/", views.OutputRegenerateView.as_view(), name="ops-output-regenerate"
+    ),
+    path("<int:pk>/v<int:number>/edit/", views.OutputEditView.as_view(), name="ops-output-edit"),
     path("<int:pk>/withdraw/", views.OutputWithdrawView.as_view(), name="ops-output-withdraw"),
     path("<int:pk>/deliver/", views.OutputDeliverView.as_view(), name="ops-output-deliver"),
     path(

@@ -582,3 +582,20 @@ def test_a_neutral_package_carries_no_flags(jarrow, approved):
         )
 
     assert all(s["heading"] != "Review flags" for s in sections)
+
+
+
+def test_the_brief_states_its_window_and_labels_older_collected_material(jarrow, approved):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    ContentItem.objects.filter(external_id="glycinate").update(
+        published_at=timezone.now() - timedelta(days=120)
+    )
+
+    sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
+
+    assert "Research window: the rolling 30 days to" in sections["Coverage and method"]
+    story = sections["Magnesium becomes a choice by goal"]
+    assert "Older material: published" in story and "before the 30-day window" in story

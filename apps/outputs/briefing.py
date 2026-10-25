@@ -171,12 +171,37 @@ def sections_for_brief(organization, codes: list[str] | None = None) -> Brief:
 # ── Sections ────────────────────────────────────────────────────────────────
 
 
+#: The rolling research window every brief states (Mark, 24 Oct). Collected
+#: material published before it is labelled older and kept out of the window.
+WINDOW_DAYS = 30
+
+
+def _item_date(item):
+    when = item.published_at or item.discovered_at
+    return when.date() if hasattr(when, "date") else when
+
+
+def _today():
+    from django.utils import timezone
+
+    return timezone.localdate()
+
+
+def is_older(item) -> bool:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    when = _item_date(item)
+    return bool(when) and when < timezone.localdate() - timedelta(days=WINDOW_DAYS)
+
+
 def _window(sources: OrderedDict) -> tuple:
     dates = []
     for (kind, _), obj in sources.items():
         if kind == "item":
-            when = obj.published_at or obj.discovered_at
-            dates.append(when.date() if hasattr(when, "date") else when)
+            if not is_older(obj):
+                dates.append(_item_date(obj))
         elif obj.published_at and not obj.is_old_material:
             # The day something was checked is not when anyone said it, so an
             # undated product page or fact sheet never stretches the window, and
@@ -441,7 +466,10 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
     return {
         "heading": "Coverage and method",
         "text": (
-            (
+            f"Research window: the rolling {WINDOW_DAYS} days to "
+            f"{_today():%-d %B %Y}. Anything published earlier is labelled older material "
+            f"wherever it appears.\n\n"
+            + (
                 f"Collected automatically: {len(items)} podcast and video item(s) from "
                 f"{len(creators)} creator(s), transcribed and quoted with the moment each "
                 f"line was said. Paid sponsor segments are identified and excluded, and the "
@@ -530,8 +558,12 @@ def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
     where = f"[{title}]({link})" if link else f"“{title}”"
     at = f" at {_timestamp(seconds)}" if seconds is not None else ""
     cited = " The speaker cites a study." if claim.is_cited else ""
+    older = (
+        f" Older material: published {_item_date(item):%-d %b %Y}, before the "
+        f"{WINDOW_DAYS}-day window." if is_older(item) else ""
+    )
     number = f" [{_cite(sources, ('item', item.pk), item)}]" if sources is not None else ""
-    return f"“{quote}” — {who}, {where}{at}.{cited}{number}"
+    return f"“{quote}” — {who}, {where}{at}.{cited}{older}{number}"
 
 
 def observation_line(o, sources: OrderedDict | None = None) -> str:

@@ -91,7 +91,16 @@
   {% endif %}
 
   <div class="card">
-    <span class="name">Versions</span>
+    <div class="row">
+      <span class="name">Versions</span>
+      {% if can_regenerate %}
+        <form method="post" action="{% url 'ops-output-regenerate' output.pk %}" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="small secondary">Regenerate from current evidence</button>
+        </form>
+      {% endif %}
+    </div>
+    <p class="note">Regenerating and editing both create a new version. Earlier versions, and anything approved, published or sent, stay exactly as they were.{% if output.type == "content_brief" %} Regenerating a content package is one model call.{% endif %}</p>
     <table>
       <thead><tr><th>Version</th><th>State</th><th>Sections</th><th>Download</th><th></th></tr></thead>
       <tbody>
@@ -109,6 +118,7 @@
               {% endif %}
             </td>
             <td>
+              <a href="{% url 'ops-output-edit' output.pk version.number %}"><button type="button" class="small secondary">Read / edit</button></a>
               <form method="post" class="inline">
                 {% csrf_token %}
                 {% if version.state == "draft" or version.state == "review ready" %}
@@ -126,6 +136,28 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <div class="card">
+    <span class="name">Downloads</span>
+    {% if downloads %}
+      <table>
+        <thead><tr><th>When</th><th>Version</th><th>Format</th><th>By</th><th></th></tr></thead>
+        <tbody>
+          {% for d in downloads %}
+            <tr>
+              <td class="muted">{{ d.created_at|date:"j M, H:i" }}</td>
+              <td>v{{ d.version.number }}</td>
+              <td>{{ d.format|upper }}</td>
+              <td class="muted">{{ d.created_by_label }}</td>
+              <td class="muted">{% if d.was_draft %}watermarked DRAFT{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">Nothing downloaded yet.</p>
+    {% endif %}
   </div>
 
   {% if live %}

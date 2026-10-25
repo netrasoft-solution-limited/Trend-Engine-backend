@@ -136,6 +136,13 @@ is a screen that cannot be fixed from an SSH session at 2am.
     {% endif %}
   </header>
   <main>
+    {% if ops_alerts %}
+      <ul class="messages">
+        {% for a in ops_alerts %}
+          <li class="error"><b>{{ a.what }}</b> — {{ a.why }}. Failing since {{ a.since|date:"j M, H:i" }} ({{ a.count }} attempt{{ a.count|pluralize }}). <a href="{% url 'ops-runs' %}">See runs →</a></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
     {% if messages %}
       <ul class="messages">
         {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}

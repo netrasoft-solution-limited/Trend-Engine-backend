@@ -39,7 +39,6 @@ from django.contrib import messages
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
 from django.views import View
 
 from apps.enrichment.domain import DOMAIN_PACK_VERSION
@@ -129,8 +128,9 @@ class OutputListView(View):
             messages.error(request, "Choose a client.")
             return back
 
-        from apps.outputs import briefing, content_brief, opportunity_brief
         from apps.scoring.models import Recommendation
+
+        from .generate import generate
 
         title = (request.POST.get("title") or "").strip()
         summary = (request.POST.get("summary") or "").strip()
@@ -141,33 +141,10 @@ class OutputListView(View):
                     recommendation = Recommendation.objects.filter(
                         organization=organization, pk=request.POST.get("recommendation") or 0
                     ).select_related("signal", "profile").first()
-                    if recommendation is None:
-                        raise services.DraftingError(
-                            "Choose the approved recommendation the content brief is for — "
-                            "the button on its Signal Review page does this for you."
-                        )
-                    sections, working_title, profile = content_brief.sections_for(
-                        organization, recommendation
-                    )
-                    title = title or working_title
-                    summary = summary or f"Content brief for {recommendation.signal.code}."
-                elif type_ == OutputType.PRODUCT_MEMO:
-                    brief = opportunity_brief.sections_for(organization)
-                    sections, profile = brief.sections, brief.profile
-                    title = title or (
-                        f"{organization.name} — new product opportunity brief, "
-                        f"{timezone.now():%B %Y}"
-                    )
-                    summary = summary or (
-                        f"{brief.developments} approved candidate(s), in priority order."
-                    )
-                else:
-                    brief = briefing.sections_for_brief(organization)
-                    sections, profile = brief.sections, brief.profile
-                    title = title or (
-                        f"{organization.name} — trend brief, {timezone.now():%-d %B %Y}"
-                    )
-                    summary = summary or brief.summary
+                built = generate(organization, type_, recommendation=recommendation)
+                sections, profile = built.sections, built.profile
+                title = title or built.title
+                summary = summary or built.summary
 
                 version = services.draft(
                     organization,
@@ -214,6 +191,10 @@ class OutputDetailView(View):
             reviews = list(output.expert_reviews.all())
             record_notes = list(output.record_notes.all())
             deliveries = list(live.deliveries.order_by("-sent_at")[:5]) if live else []
+            downloads = list(
+                ExportArtifact.objects.filter(version__output=output)
+                .select_related("version").order_by("-pk")[:12]
+            )
             from apps.clients.contacts import recipients_for
 
             recipients = recipients_for(organization)
@@ -235,6 +216,10 @@ class OutputDetailView(View):
                 "deliveries": deliveries,
                 "recipients": recipients,
                 "formats": [(f, exports.LABELS.get(f, f)) for f in exports.available()],
+                "downloads": downloads,
+                "can_regenerate": output.type in GENERATED_TYPES and (
+                    output.type != OutputType.CONTENT_BRIEF or output.recommendation_id
+                ),
             },
         )
 
@@ -435,3 +420,106 @@ def _output(pk: int):
     with operator_scope():
         output = get_object_or_404(Output.objects.select_related("organization"), pk=pk)
         return output, output.organization
+
+
+class OutputRegenerateView(View):
+    """A new version built from current approved evidence (Mark, 24 Oct).
+
+    Earlier versions are kept exactly as they were. The new one is a draft, so
+    it needs approving (and, for health types, an expert sign-off) on its own.
+    """
+
+    def post(self, request, pk: int):
+        require_platform_admin(request, action="Regenerating an output")
+        output, organization = _output(pk)
+        back = redirect(reverse("ops-output", args=[pk]))
+        from .generate import generate
+
+        with scoped(organization):
+            try:
+                built = generate(organization, output.type, recommendation=output.recommendation)
+                version = services.draft(
+                    organization,
+                    type=output.type,
+                    title=output.title,
+                    sections=built.sections,
+                    summary=built.summary,
+                    actor_label=_actor(request),
+                    client_profile_version=built.profile,
+                    domain_pack_version=DOMAIN_PACK_VERSION,
+                    recommendation=output.recommendation,
+                )
+            except services.DraftingError as exc:
+                messages.error(request, str(exc))
+                return back
+        messages.success(
+            request,
+            f"v{version.number} drafted from current evidence. Earlier versions are unchanged; "
+            f"this one needs its own review.",
+        )
+        return back
+
+
+class OutputEditView(View):
+    """Edit a version's sections; saving creates the next version.
+
+    Never edits in place: an approved or published version is a record of what
+    was approved or sent, and stays one.
+    """
+
+    def get(self, request, pk: int, number: int):
+        require_platform_admin(request, action="Editing an output")
+        output, organization = _output(pk)
+        with scoped(organization):
+            version = get_object_or_404(OutputVersion, output=output, number=number)
+        return render(request, "ops/outputs/edit.html", {
+            "output": output, "organization": organization, "version": version,
+            "sections": list(enumerate(version.body)),
+        })
+
+    def post(self, request, pk: int, number: int):
+        require_platform_admin(request, action="Editing an output")
+        output, organization = _output(pk)
+        with scoped(organization):
+            version = get_object_or_404(OutputVersion, output=output, number=number)
+            sections = []
+            for i in range(len(version.body)):
+                if request.POST.get(f"remove_{i}"):
+                    continue
+                heading = (request.POST.get(f"heading_{i}") or "").strip()
+                text = (request.POST.get(f"text_{i}") or "").replace("\r\n", "\n").strip()
+                if heading or text:
+                    sections.append({"heading": heading, "text": text})
+            if sections == version.body:
+                messages.info(request, "No changes, so no new version.")
+                return redirect(reverse("ops-output", args=[pk]))
+            try:
+                new = services.draft(
+                    organization,
+                    type=output.type,
+                    title=output.title,
+                    sections=sections,
+                    summary=version.summary,
+                    actor_label=_actor(request),
+                    client_profile_version=output.client_profile_version,
+                    domain_pack_version=output.domain_pack_version,
+                    recommendation=output.recommendation,
+                )
+            except services.DraftingError as exc:
+                messages.error(request, str(exc))
+                return redirect(reverse("ops-output-edit", args=[pk, number]))
+            AuditEvent.objects.create(
+                kind=AuditEvent.Kind.CONFIG,
+                actor_realm=AuditEvent.Realm.OPERATOR,
+                actor_label=_actor(request),
+                organization=organization,
+                message=f"Edited {output.title} v{number} into v{new.number}",
+                context={"output_id": output.pk, "from": number, "to": new.number},
+            )
+            from apps.outputs.content_brief import voice_flags
+
+            flags = voice_flags(sections) if output.type == OutputType.CONTENT_BRIEF else []
+        messages.success(request, f"Saved as v{new.number}. v{number} is unchanged.")
+        for flag in flags[:5]:
+            messages.warning(request, f"Check before review — {flag}")
+        return redirect(reverse("ops-output", args=[pk]))
