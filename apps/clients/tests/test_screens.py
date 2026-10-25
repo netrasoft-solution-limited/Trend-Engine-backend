@@ -523,3 +523,51 @@ def test_the_template_sent_to_mark_imports_cleanly():
     spec = services.spec_from_csv(template.read_text())
 
     assert len(spec["assets"]) == 8 and len(spec["audiences"]) == 3
+
+
+# ── Full catalogue inventory upload (Mark, 24 Oct) ──────────────────────────
+
+INVENTORY = (
+    "﻿catalogue_id,product,primary_listening_family,listening_topics,url,listing_status,"
+    "variants,available_variants,skus,manufacturer_tags,brief_status,review_note\n"
+    "1,Gut & Protein Optimizer,Digestion and protein,Protein digestion,"
+    "https://jarrow.com/products/gut-protein-optimizer,Included,1,1,JRW1,probiotic,,\n"
+    "2,Magnesium,Stress and relaxation,Sleep,https://jarrow.com/products/magnesium,"
+    "Included,1,1,JRW2,magnesium,,\n"
+    "3,BoneUp®,Bone health,Bone density,https://jarrow.com/products/boneup,Included,1,1,"
+    "JRW3,calcium,,\n"
+)
+
+
+def test_a_catalogue_inventory_replaces_products_and_keeps_what_was_written(
+    client, admin, jarrow, live_profile
+):
+    import io
+
+    with scoped(jarrow):
+        ClientTerm.objects.create(
+            organization=jarrow, profile=live_profile, facet=ClientTerm.Facet.PRIORITY,
+            name="Sleep", terms=["sleep"], weight=70,
+        )
+        ClientAsset.objects.filter(profile=live_profile, name="Magnesium").update(
+            terms=["magnesium", "hand-added word"]
+        )
+    client.force_login(admin)
+    upload = io.BytesIO(INVENTORY.encode())
+    upload.name = "Jarrow-Full-Portfolio.csv"
+
+    page = client.post(
+        reverse("ops-client-profile-import", args=[jarrow.slug]), {"file": upload}, follow=True
+    ).content.decode()
+
+    assert "Recognised a full catalogue inventory" in page
+    assert "3 listing(s) in 3 families" in page
+    with scoped(jarrow):
+        version = ClientProfileVersion.objects.get(organization=jarrow, number=2)
+        assert not version.is_current, "a draft, never live by itself"
+        names = set(version.assets.exclude(kind="category").values_list("name", flat=True))
+        assert names == {"Gut & Protein Optimizer", "Magnesium", "BoneUp®"}
+        assert version.terms.filter(name="Sleep").exists(), "priorities kept"
+        magnesium = version.assets.get(name="Magnesium")
+        assert "hand-added word" in magnesium.terms
+        assert magnesium.family == "Stress and relaxation"

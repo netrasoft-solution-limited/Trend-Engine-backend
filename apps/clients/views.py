@@ -266,6 +266,8 @@ class ClientProfileImportView(View):
 
         is_json = upload.name.lower().endswith(".json")
         actor = getattr(request.user, "email", str(request.user))
+        if not is_json and _is_inventory(text):
+            return self._inventory(request, organization, upload.name, text, actor)
         try:
             if is_json:
                 spec = json.loads(text)
@@ -296,6 +298,54 @@ class ClientProfileImportView(View):
             f"{counts[1]} audience/priority/competitor term(s). Review it, then make it live.",
         )
         return redirect(reverse("ops-client-profile", args=[slug, version.number]))
+
+
+    def _inventory(self, request, organization, filename, text, actor):
+        """A full catalogue inventory replaces the products, keeps the rest.
+
+        Audiences, priorities and competitors come across from the live profile,
+        and so do words an operator added to a listing by hand, so re-importing
+        next month's catalogue loses nothing anyone wrote.
+        """
+        from .catalogue_import import spec_from_inventory
+
+        spec, _ = spec_from_inventory(text)
+        with scoped(organization):
+            current = services.current_for(organization)
+            if current is not None:
+                previous = services.to_spec(current)
+                for key in services.SPEC_FACETS:
+                    spec[key] = previous[key]
+                by_name = {a["name"].lower(): a for a in previous["assets"]}
+                for asset in spec["assets"]:
+                    old = by_name.get(asset["name"].lower())
+                    if old:
+                        asset["terms"] = list(dict.fromkeys([*asset["terms"], *old["terms"]]))
+            version = services.load_spec(
+                organization,
+                spec,
+                label=(request.POST.get("label") or "").strip()
+                or f"Catalogue inventory {filename}",
+                actor_label=actor,
+                copy_current=False,
+            )
+            listings = version.assets.exclude(kind=ClientAsset.Kind.CATEGORY).count()
+            families = version.assets.exclude(family="").values("family").distinct().count()
+        messages.success(
+            request,
+            f"Recognised a full catalogue inventory. Drafted v{version.number}: {listings} "
+            f"listing(s) in {families} famil{'y' if families == 1 else 'ies'}, with the live "
+            f"profile's audiences, priorities and added words kept. Review it, then make it live.",
+        )
+        return redirect(reverse("ops-client-profile", args=[organization.slug, version.number]))
+
+
+def _is_inventory(text: str) -> bool:
+    """The catalogue inventory format: a `product` and a `primary_listening_family`
+    column, as in the full-portfolio sheet."""
+    header = text.lstrip("\ufeff").splitlines()[0].lower() if text.strip() else ""
+    columns = {c.strip().strip('"') for c in header.split(",")}
+    return {"product", "primary_listening_family"} <= columns
 
 
 class ClientProfileExportView(View):

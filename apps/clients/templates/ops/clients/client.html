@@ -57,8 +57,11 @@ remember which screen does what.
       <code>kind</code>, <code>terms</code> separated by <code>;</code>,
       <code>weight</code>) is added to a copy of the live profile. A
       <b>JSON profile</b> — the file the Export link on any version downloads —
-      replaces it whole. Either way you get a draft to review; nothing goes live
-      until you say so.
+      replaces it whole. A <b>full catalogue inventory</b> (columns <code>product</code>
+      and <code>primary_listening_family</code>, like the full-portfolio sheet) replaces
+      the products, assigns each listing to its family, and keeps the live profile's
+      audiences, priorities and any words added by hand. Either way you get a draft to
+      review; nothing goes live until you say so.
     </p>
     <form method="post" action="{% url 'ops-client-profile-import' organization.slug %}"
           enctype="multipart/form-data">
