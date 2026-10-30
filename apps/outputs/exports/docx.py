@@ -132,6 +132,7 @@ def _add_table(doc, block) -> None:
     table = doc.add_table(rows=1 + len(block.rows), cols=len(block.header))
     table.style = "Table Grid"
     for r, row in enumerate((block.header, *block.rows)):
+        _paginate(table.rows[r], header=r == 0)
         for c, text in enumerate(row):
             paragraph = table.cell(r, c).paragraphs[0]
             _add_linked(paragraph, text)
@@ -139,6 +140,18 @@ def _add_table(doc, block) -> None:
                 run.font.size = Pt(9.5)
                 run.bold = r == 0 or None
     doc.add_paragraph()
+
+
+def _paginate(row, *, header: bool) -> None:
+    """Keep a row on one page, and repeat the header row on every page.
+
+    Without these, Word broke rows across pages and a continued table had no
+    column headings (Mark, 30 Oct).
+    """
+    properties = row._tr.get_or_add_trPr()
+    properties.append(OxmlElement("w:cantSplit"))
+    if header:
+        properties.append(OxmlElement("w:tblHeader"))
 
 
 def _add_linked(paragraph, text: str) -> None:

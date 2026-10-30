@@ -18,7 +18,7 @@ minimum the relevance gate and extraction need. MetricSnapshot and Tombstone
 from __future__ import annotations
 
 import hashlib
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from django.db import models
 
@@ -184,15 +184,29 @@ class ContentItem(models.Model):
         Podcast episode pages have no common convention, so they get the plain
         URL and the reader is given the timestamp alongside it.
         """
-        if not self.url:
+        url = self.clean_url
+        if not url:
             return ""
         if seconds is None or seconds < 0:
-            return self.url
-        host = urlsplit(self.url).netloc.lower()
+            return url
+        host = urlsplit(url).netloc.lower()
         if host.endswith("youtube.com") or host.endswith("youtu.be"):
-            separator = "&" if "?" in self.url else "?"
-            return f"{self.url}{separator}t={int(seconds)}s"
-        return self.url
+            separator = "&" if "?" in url else "?"
+            return f"{url}{separator}t={int(seconds)}s"
+        return url
+
+    @property
+    def clean_url(self) -> str:
+        """The URL without a start time it was collected with. A search result
+        can carry `t=423s`; adding the quote's own moment then produced
+        `&t=423s&t=0s` in a client brief (Mark, 30 Oct)."""
+        if not self.url:
+            return ""
+        parts = urlsplit(self.url)
+        query = "&".join(
+            p for p in parts.query.split("&") if p and not p.startswith(("t=", "start="))
+        )
+        return urlunsplit(parts._replace(query=query))
 
     @staticmethod
     def hash_content(*parts: str) -> str:

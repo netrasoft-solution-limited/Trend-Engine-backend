@@ -123,4 +123,4 @@ def test_older_material_does_not_set_the_window(jarrow):
 
     about = {s["heading"]: s["text"] for s in brief(jarrow).sections}["About this brief"]
 
-    assert "Between 5 October and 12 October 2026" in about
+    assert "published between 5 October and 12 October 2026" in about

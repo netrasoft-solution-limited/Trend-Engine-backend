@@ -500,7 +500,7 @@ def test_an_observation_with_no_public_page_names_where_it_came_from(db):
         provenance="Pure Play opportunity brief [2]", entered_by="abu",
     )
 
-    assert "spermidine (no public link; Pure Play opportunity brief [2])" in (
+    assert "spermidine (no public link; Pure Play opportunity brief, source 2)" in (
         briefing.observation_line(o)
     )
     assert "](" not in briefing.observation_line(o)
@@ -596,6 +596,24 @@ def test_the_brief_states_its_window_and_labels_older_collected_material(jarrow,
 
     sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
 
-    assert "Research window: the rolling 30 days to" in sections["Coverage and method"]
+    assert "(the rolling 30 days to the date of this brief)" in sections["Coverage and method"]
     story = sections["Magnesium becomes a choice by goal"]
     assert "Older material: published" in story and "before the 30-day window" in story
+
+
+def test_another_documents_reference_numbers_are_not_carried_over():
+    """Imported rows carried the October report's own "[25]" (Mark, 30 Oct)."""
+    assert briefing.own_words("Some reviews disclose free product. [25]") == (
+        "Some reviews disclose free product."
+    )
+    assert briefing.own_words("Opportunity Brief, Oct 2026 [2]", keep_as="source") == (
+        "Opportunity Brief, Oct 2026, source 2"
+    )
+
+
+def test_a_collected_start_time_is_not_doubled():
+    from apps.evidence.models import ContentItem
+
+    item = ContentItem(url="https://www.youtube.com/watch?v=abc&t=423s")
+    assert item.link_at(138) == "https://www.youtube.com/watch?v=abc&t=138s"
+    assert item.clean_url == "https://www.youtube.com/watch?v=abc"

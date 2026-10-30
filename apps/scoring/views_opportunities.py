@@ -116,6 +116,22 @@ class CandidateView(View):
                     if missing:
                         messages.error(request, "No observation "
                                        + ", ".join(f"O{m}" for m in missing) + ".")
+                elif action == "obs.collect":
+                    new = opportunities.collect(candidate, actor_label=actor)
+                    if new:
+                        messages.success(
+                            request,
+                            f"Attached {len(new)} collected episode(s) that discuss "
+                            f"{candidate.name}. Read them, then draft or edit the case "
+                            "and approve again.",
+                        )
+                    else:
+                        messages.info(
+                            request,
+                            f"No analysed podcast or video from the last "
+                            f"{opportunities.COLLECT_DAYS} days names {candidate.name} "
+                            "that is not already attached.",
+                        )
                 elif action == "obs.detach":
                     opportunities.detach(
                         candidate, int(request.POST.get("observation") or 0), actor_label=actor

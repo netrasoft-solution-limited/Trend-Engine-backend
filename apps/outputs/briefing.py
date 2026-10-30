@@ -111,8 +111,40 @@ def approved_developments(organization, codes: list[str] | None = None) -> list[
         )
     )
     developments = [Development(r.signal, r, ranks.get(r.signal_id)) for r in recommendations]
-    developments.sort(key=lambda d: (-(d.rank or 0), d.signal.code))
+    # Strongest standing first, then the freshest evidence, then rank: a watch
+    # item built from early-October examples no longer leads a recurring
+    # discussion with this week's sources (Mark, 30 Oct).
+    developments.sort(key=lambda d: (
+        STANDING.get(d.signal.maturity, len(STANDING)),
+        -(latest_evidence(d.signal).toordinal() if latest_evidence(d.signal) else 0),
+        -(d.rank or 0),
+        d.signal.code,
+    ))
     return developments
+
+
+#: How a development's status orders it in a brief.
+STANDING = {
+    Signal.Maturity.MEASURED_TREND: 0,
+    Signal.Maturity.RECURRING: 1,
+    Signal.Maturity.WATCH: 2,
+}
+
+
+def latest_evidence(signal: Signal):
+    """The newest publication date among a development's supporting sources."""
+    dates = [
+        _item_date(row.claim.content_item)
+        for row in SignalEvidence.objects.filter(
+            signal=signal, role=SignalEvidence.Role.SUPPORTS
+        ).select_related("claim__content_item")
+    ] + [
+        link.observation.published_at
+        for link in signal.observations.filter(role="supports").select_related("observation")
+        if link.observation.source_type not in ("catalogue", "research")
+    ]
+    dates = [d for d in dates if d]
+    return max(dates) if dates else None
 
 
 @dataclass
@@ -211,31 +243,64 @@ def _window(sources: OrderedDict) -> tuple:
     return (min(dates), max(dates)) if dates else (None, None)
 
 
-def _about(organization, developments, sources) -> dict:
-    start, end = _window(sources)
-    span = (
-        f"between {start:%-d %B}{f' {start.year}' if start.year != end.year else ''} and "
-        f"{end:%-d %B %Y}" if start and start != end
-        else f"on {start:%-d %B %Y}" if start else "in the current window"
+def research_window() -> tuple:
+    """The rolling window every brief states, ending today."""
+    from datetime import timedelta
+
+    end = _today()
+    return end - timedelta(days=WINDOW_DAYS), end
+
+
+def window_sentence(sources: OrderedDict) -> str:
+    """One wording for the research window, used in every place a brief dates
+    itself. Brief 7 said "6 to 28 October" in one section and "the rolling 30
+    days to 30 October" in another (Mark, 30 Oct): one is the window, the other
+    is when the cited sources happened to be published, and both are now said
+    together, plainly."""
+    start, end = research_window()
+    first, last = _window(sources)
+    window = (
+        f"Research window: {start:%-d %B}{f' {start.year}' if start.year != end.year else ''}"
+        f" to {end:%-d %B %Y} (the rolling {WINDOW_DAYS} days to the date of this brief)."
     )
+    if first and last:
+        published = (
+            f"on {first:%-d %B %Y}" if first == last else
+            f"between {first:%-d %B}{f' {first.year}' if first.year != last.year else ''} "
+            f"and {last:%-d %B %Y}"
+        )
+        window += f" The sources cited inside it were published {published}."
+    return window + " Anything published earlier is labelled older material where it appears."
+
+
+def _about(organization, developments, sources) -> dict:
     measured = any(d.signal.maturity == Signal.Maturity.MEASURED_TREND for d in developments)
     caution = (
-        "Some developments below are measured trends; each says so."
+        "Developments marked as measured rising trends are measured; every other "
+        "development is a recurring discussion or a watch item, and says so."
         if measured else
-        "These are current conversation themes and editorial priorities. We have not "
-        "measured market growth or proven that any topic is accelerating."
+        "These are recurring discussions and watch items, not measured growth: we have "
+        "not measured market growth or shown that any topic is accelerating."
     )
     return {
         "heading": "About this brief",
         "text": (
             f"This brief reviews what people discussed in podcasts, YouTube and online "
-            f"communities {span}, and where the {organization.name} range fits those "
-            f"conversations. {caution} Every claim is linked to a dated source, listed in "
-            f"full at the end.\n\n"
-            f"Content drafts referred to here are for Scientific Affairs review and have "
-            f"not been published. They have not been medically or legally approved."
+            f"communities, and where the {organization.name} range fits those "
+            f"conversations. {window_sentence(sources)}\n\n"
+            f"{caution} Every claim is linked to a dated source, listed in full at the "
+            f"end.\n\n{REVIEW_STATUS}"
         ),
     }
+
+
+#: Said once, the same way, wherever a brief describes its own review status.
+#: True when the draft is generated; a later sign-off is recorded on the
+#: output and stated in the email that carries it.
+REVIEW_STATUS = (
+    "Review status: a draft prepared by Pure Play. No medical, scientific or legal "
+    "expert has reviewed it, and nothing in it is an approved claim."
+)
 
 
 def _executive_summary(organization, developments, watched, sources) -> dict:
@@ -258,7 +323,7 @@ def _executive_summary(organization, developments, watched, sources) -> dict:
         ["| Story | Status | Recommended response |"]
         + [
             f"| {d.signal.title} | {d.signal.get_maturity_display()} | "
-            + _cell(client_facing(d.recommendation.actions[0]["action"])
+            + _cell(_first_sentence(client_facing(d.recommendation.actions[0]["action"]))
                     if d.recommendation.actions else _first_sentence(
                         client_facing(d.recommendation.why_it_matters)))
             + " |"
@@ -268,7 +333,8 @@ def _executive_summary(organization, developments, watched, sources) -> dict:
     return {
         "heading": "Executive summary",
         "text": (
-            f"Our recommendation. {lead.signal.title} is the lead story in this review. "
+            f"Our recommendation. Lead with {_lower_first(lead.signal.title)} "
+            f"({lead.signal.get_maturity_display().lower()}). "
             f"{_first_sentence(client_facing(lead.recommendation.why_it_matters))}\n\n"
             f"{' · '.join(c for c in counts if c)}.\n\n"
             f"{stories}"
@@ -466,9 +532,7 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
     return {
         "heading": "Coverage and method",
         "text": (
-            f"Research window: the rolling {WINDOW_DAYS} days to "
-            f"{_today():%-d %B %Y}. Anything published earlier is labelled older material "
-            f"wherever it appears.\n\n"
+            f"{window_sentence(sources)}\n\n"
             + (
                 f"Collected automatically: {len(items)} podcast and video item(s) from "
                 f"{len(creators)} creator(s), transcribed and quoted with the moment each "
@@ -483,12 +547,23 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
             f"These are targeted examples, not a representative sample. Figures keep "
             f"their kind: a search estimate is a rolling monthly average, Shop counts are "
             f"global lifetime totals, engagement is cumulative.\n\n"
-            f"Each story was reviewed and approved by a Pure Play analyst, as was every "
-            f"recommendation to {organization.name}, against {_possessive(organization.name)} "
-            f"profile {', '.join(sorted(profiles)) or '(unversioned)'}. Expert approval, "
-            f"publication and measurement are separate steps that follow."
+            f"{_approvals(organization, developments, profiles)}\n\n{REVIEW_STATUS}"
         ),
     }
+
+
+def _approvals(organization, developments, profiles) -> str:
+    """Who approved what, and when — from the records, not a stock sentence."""
+    lines = []
+    for d in developments:
+        rec = d.recommendation
+        who = rec.decided_by_label or "an analyst"
+        when = f" on {rec.decided_at:%-d %B %Y}" if rec.decided_at else ""
+        lines.append(f"{d.signal.title}: approved by {who}{when}")
+    return (
+        f"Approvals inside Pure Play, against {_possessive(organization.name)} profile "
+        f"{', '.join(sorted(profiles)) or '(unversioned)'}: " + "; ".join(lines) + "."
+    )
 
 
 def _sources(sources: OrderedDict) -> dict:
@@ -497,14 +572,15 @@ def _sources(sources: OrderedDict) -> dict:
         if kind == "item":
             lines.append(f"· [{n}] {_source_line(obj)}")
         else:
-            note = "; ".join(p for p in [", ".join(obj.labels), obj.limitations.strip()] if p)
+            note = "; ".join(p for p in [", ".join(obj.labels), own_words(obj.limitations)] if p)
             lines.append(
                 f"· [{n}] "
                 + (f"{obj.published_at:%-d %b %Y}" if obj.published_at
                    else f"checked {obj.observed_at:%-d %b %Y}")
                 + " — "
                 + (f"[{_label(obj.title)}]({obj.url})" if obj.url
-                   else f"{_label(obj.title)} (no public link; {obj.provenance})")
+                   else f"{_label(obj.title)} (no public link; "
+                   f"{own_words(obj.provenance, keep_as='source')})")
                 + f" — {obj.get_source_type_display()}"
                 + (f". {note}" if note else "")
             )
@@ -566,6 +642,20 @@ def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
     return f"“{quote}” — {who}, {where}{at}.{cited}{older}{number}"
 
 
+def own_words(text: str, *, keep_as: str = "") -> str:
+    """Analyst text with another document's citation numbers taken out.
+
+    Rows imported from Pure Play's October report carried that report's own
+    numbers ("[25]", "Opportunity Brief, Oct 2026 [2]"), which then read as
+    this brief's sources (Mark, 30 Oct). With `keep_as`, a number is kept in
+    words ("source 2") — for provenance, where it locates the original.
+    """
+    text = text or ""
+    if keep_as:
+        return re.sub(r"\s*\[(\d+)\]", rf", {keep_as} \1", text)
+    return re.sub(r"\s*\[\d+\]", "", text).strip()
+
+
 def observation_line(o, sources: OrderedDict | None = None) -> str:
     """A hand-entered observation, readable by a client and fully traceable.
 
@@ -574,14 +664,15 @@ def observation_line(o, sources: OrderedDict | None = None) -> str:
     buyers — and every label travels with it.
     """
     title = _label(o.title)
-    parts = [f"[{title}]({o.url})" if o.url else f"{title} (no public link; {o.provenance})",
+    parts = [f"[{title}]({o.url})" if o.url
+             else f"{title} (no public link; {own_words(o.provenance, keep_as='source')})",
              o.get_source_type_display()]
     if o.published_at:
         parts.append(f"published {o.published_at:%-d %b %Y}")
     parts.append(f"observed {o.observed_at:%-d %b %Y}")
     line = "; ".join(parts) + "."
     if o.excerpt:
-        line = f"{o.excerpt.strip().rstrip('.')}. " + line
+        line = f"{own_words(o.excerpt).rstrip('.')}. " + line
     if o.metric_kind:
         figure = o.metric_label or (f"{o.metric_value:,.0f}" if o.metric_value is not None else "")
         line += f" {figure} ({o.get_metric_kind_display().lower()}"
@@ -591,7 +682,7 @@ def observation_line(o, sources: OrderedDict | None = None) -> str:
     if o.labels:
         line += f" Labelled: {', '.join(o.labels)}."
     if o.limitations:
-        line += f" {o.limitations.strip().rstrip('.')}."
+        line += f" {own_words(o.limitations).rstrip('.')}."
     if sources is not None:
         line += f" [{_cite(sources, ('obs', o.pk), o)}]"
     return line
@@ -601,7 +692,7 @@ def _source_line(item: ContentItem) -> str:
     who = item.creator or item.source.name
     when = item.published_at or item.discovered_at
     title = _label(item.title)
-    named = f"[{title}]({item.url})" if item.url else title
+    named = f"[{title}]({item.clean_url})" if item.url else title
     return f"{named} — {who}" + (f", {when:%-d %b %Y}" if when else "")
 
 
@@ -646,6 +737,10 @@ def _first_sentence(text: str) -> str:
         if end in text:
             return text.split(end, 1)[0] + end.strip()
     return text
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:] if text[:2] != text[:2].upper() else text
 
 
 def _possessive(name: str) -> str:

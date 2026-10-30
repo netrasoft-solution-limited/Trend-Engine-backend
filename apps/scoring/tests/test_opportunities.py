@@ -251,3 +251,40 @@ def test_changing_the_evidence_or_adjacent_listings_withdraws_approval(catalogue
         opportunities.attach(candidate, [observation(url="https://x.test/2").pk], actor_label="abu")
         candidate.refresh_from_db()
         assert not candidate.is_approved
+
+
+def test_collected_episodes_that_name_a_candidate_become_attached_observations(catalogue):
+    """Urolithin A needed collected findings copied by hand (Mark, 30 Oct)."""
+    from apps.enrichment.models import Claim
+    from apps.evidence.models import ContentItem, ContentSegment
+    from apps.sources.models import Source
+
+    source = Source.objects.create(name="Longevity show", route=Source.Route.YOUTUBE)
+
+    def episode(external_id, quote, **kw):
+        item = ContentItem.objects.create(
+            source=source, external_id=external_id, title=f"Episode {external_id}",
+            url=f"https://www.youtube.com/watch?v={external_id}&t=99s", content_hash=external_id,
+            creator="Dr Host", **kw,
+        )
+        segment = ContentSegment.objects.create(
+            content_item=item, ordinal=1, text=quote, start_char=0, end_char=len(quote)
+        )
+        Claim.objects.create(content_item=item, segment=segment, kind="effect",
+                             subject="mitochondria", text=quote, quote=quote)
+        return item
+
+    episode("a1", "Urolithin A comes from pomegranate compounds in the gut.")
+    episode("b2", "Creatine is well studied.")
+    candidate = create(catalogue, "Urolithin A", aliases="mitopure")
+
+    with scoped(catalogue):
+        first = opportunities.collect(candidate, actor_label="abu")
+        again = opportunities.collect(candidate, actor_label="abu")
+
+    assert len(first) == 1 and again == []
+    o = Observation.objects.get(pk=first[0])
+    assert o.url == "https://www.youtube.com/watch?v=a1"
+    assert o.source_type == "youtube" and "pomegranate" in o.excerpt
+    assert o.provenance.startswith("Collected automatically: item")
+    assert list(candidate.observations.values_list("pk", flat=True)) == first

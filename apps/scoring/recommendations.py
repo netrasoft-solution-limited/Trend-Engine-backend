@@ -48,7 +48,7 @@ from .models import ClientSignalScore, Recommendation
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "recommendation/2026-10-20"
+PROMPT_VERSION = "recommendation/2026-10-30"
 
 #: Example Outputs B1's owners. Anything else is mapped to the nearest
 #: catch-all rather than stored as whatever the model invented.
@@ -111,6 +111,13 @@ lifetime total, engagement is cumulative), and treat advertisements and brand \
 content as marketing, not independent demand.
 - Name only products that appear in the brand's profile, exactly as written \
 there. Never suggest a product the brand does not list.
+- Describe a product only as its profile entry does (its manufacturer \
+description and terms). Never state, guess or ask to confirm whether a product \
+contains an ingredient when its entry already says; never contradict the entry. \
+Only if the entry is silent may an action ask the brand to confirm the formula.
+- Write for a commercial reader: `why_it_matters` is two to four short \
+sentences, and each action is one or two sentences — the thing to do and its \
+owner, not an essay.
 - Actions are concrete and owned: content to write, a product page to change, \
 a claim to send to scientific/legal review, a test to run. Owners are one of: \
 {", ".join(OWNERS)}.
@@ -296,7 +303,9 @@ def _render(
         ) or "- (none listed)"
 
     assets = "\n".join(
-        f"- {a.name} [{a.get_kind_display()}, weight {a.weight}]{': ' + a.notes if a.notes else ''}"
+        f"- {a.name} [{a.get_kind_display()}, weight {a.weight}]"
+        f"{': ' + a.notes if a.notes else ''}"
+        f"{' Terms: ' + ', '.join(a.terms) if a.terms else ''}"
         for a in profile.assets.order_by("-weight", "name")
     ) or "- (none listed)"
 

@@ -551,3 +551,21 @@ def test_a_docx_carries_the_table_and_the_running_header(settings):
 
     assert word.tables[0].cell(1, 0).text == "Spermidine"
     assert "PURE PLAY ECOMMERCE CONSULTING" in word.sections[0].header.paragraphs[0].text
+
+
+def test_word_tables_keep_rows_whole_and_repeat_their_header():
+    """Mark, 30 Oct: rows broke across pages and continued tables lost headings."""
+    import io
+    import zipfile
+
+    from apps.outputs import exports
+    from apps.outputs.exports.document import document_from_body
+
+    document = document_from_body(
+        title="T", type_label="Brief", organization_name="Org",
+        body=[{"heading": "Table", "text": "| A | B |\n| 1 | 2 |\n| 3 | 4 |"}],
+    )
+    rendered = exports.render(document, "docx")
+    xml = zipfile.ZipFile(io.BytesIO(rendered.content)).read("word/document.xml").decode()
+    assert xml.count("<w:cantSplit/>") == 3
+    assert xml.count("<w:tblHeader/>") == 1

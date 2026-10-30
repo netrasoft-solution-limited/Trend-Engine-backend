@@ -36,7 +36,7 @@ from apps.enrichment.llm.client import (
     recommendation_tier,
 )
 from apps.enrichment.llm.costs import CostCapExceeded
-from apps.enrichment.models import ModelRun
+from apps.enrichment.models import Claim, ModelRun
 from apps.evidence.models import Observation
 from apps.operations.models import AuditEvent
 
@@ -177,6 +177,76 @@ def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[l
                f"Attached {len(attached)} observation(s) to {candidate.name}",
                {"candidate_id": candidate.pk, "observation_ids": attached})
     return attached, [i for i in ids if i not in attached]
+
+
+#: How far back collected episodes are searched — the briefs' research window.
+COLLECT_DAYS = 30
+COLLECTED_BY = "collected automatically"
+
+
+def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
+    """Attach every analysed podcast or video in the window that discusses it.
+
+    Adding Urolithin A meant copying what collection had found into
+    observations by hand (Mark, 30 Oct). Here each collected item whose claims
+    name the candidate (or an alias) becomes one observation — its link, its
+    publication date, the claim it made and where it came from — and is
+    attached. Sponsored segments and duplicate uploads are left out, and the
+    same item is never turned into a second observation. Attaching withdraws
+    approval, like any change to the evidence, so new findings are read before
+    the brief uses them. Returns the ids attached.
+    """
+    from datetime import timedelta
+
+    names = [candidate.name, *candidate.aliases]
+    patterns = [_pattern(n) for n in names if n.strip()]
+    since = timezone.now() - timedelta(days=COLLECT_DAYS)
+    claims = (
+        Claim.objects.filter(is_sponsored=False, content_item__discovered_at__gte=since)
+        .exclude(content_item__duplicate_status="confirmed")
+        .select_related("content_item__source")
+        .order_by("-is_cited", "pk")
+    )
+    best: dict[int, Claim] = {}
+    for claim in claims:
+        text = f"{claim.subject} {claim.text} {claim.quote}".lower()
+        if claim.content_item_id not in best and any(p.search(text) for p in patterns):
+            best[claim.content_item_id] = claim
+
+    today = timezone.localdate()
+    window_start = today - timedelta(days=COLLECT_DAYS)
+    ids = []
+    for claim in best.values():
+        item = claim.content_item
+        marker = f"Collected automatically: item {item.pk}"
+        existing = Observation.objects.filter(provenance__startswith=marker).first()
+        if existing is None:
+            published = item.published_at.date() if item.published_at else None
+            existing = Observation.objects.create(
+                url=item.clean_url,
+                title=item.title[:500],
+                source_type=(
+                    Observation.SourceType.YOUTUBE if "youtube" in (item.url or "")
+                    else Observation.SourceType.PODCAST
+                ),
+                published_at=published,
+                observed_at=today,
+                topic=candidate.name,
+                excerpt=f"{item.creator or item.source.name}: “{claim.quote.strip()[:280]}”",
+                is_old_material=bool(published and published < window_start),
+                limitations=(
+                    "Collected automatically; a speaker's statement quoted from the "
+                    "transcript, not checked against any study it mentions."
+                ),
+                event_key=f"item-{item.duplicate_of_id or item.pk}",
+                entered_by=COLLECTED_BY,
+                provenance=f"{marker}; claim C{claim.pk}",
+            )
+        ids.append(existing.pk)
+    new = [i for i in ids if not candidate.observations.filter(pk=i).exists()]
+    if new:
+        attach(candidate, new, actor_label=actor_label)
+    return new
 
 
 def detach(candidate: Candidate, observation_id: int, *, actor_label: str) -> None:

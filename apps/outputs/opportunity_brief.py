@@ -18,13 +18,14 @@ from apps.scoring import opportunities
 from apps.scoring.models import Candidate
 
 from .briefing import (
+    REVIEW_STATUS,
     Brief,
     _cell,
     _cite,
     _first_sentence,
     _sources,
-    _window,
     observation_line,
+    window_sentence,
 )
 from .services import DraftingError
 
@@ -110,22 +111,16 @@ def _about(organization, candidates, sources, note) -> dict:
     observed = [o for c in candidates for o in c.observations.all()]
     for o in observed:
         sources.setdefault(("obs", o.pk), o)
-    start, end = _window(sources)
-    span = (
-        f"Between {start:%-d %B}{f' {start.year}' if start.year != end.year else ''} and "
-        f"{end:%-d %B %Y}" if start and start != end
-        else "This period"
-    )
     return {
         "heading": "About this brief",
         "text": (
-            f"This brief looks beyond the current {organization.name} range. {span} we "
-            f"reviewed {len(candidates)} ingredient(s) {organization.name} does not appear to "
-            f"sell ({_names(candidates)}) against podcast, video, social, Reddit and search "
-            f"signals, and ranked them for commercial testing.\n\n"
+            f"This brief looks beyond the current {organization.name} range. We reviewed "
+            f"{len(candidates)} ingredient(s) {organization.name} does not appear to sell "
+            f"({_names(candidates)}) against podcast, video, social, Reddit and search "
+            f"signals, and ranked them for commercial testing. {window_sentence(sources)}\n\n"
             f"The ranking is our commercial judgment within this review. It is not a "
             f"market-size ranking. Every observation is linked to a dated source, listed in "
-            f"full at the end.\n\n{note}"
+            f"full at the end.\n\n{note}\n\n{REVIEW_STATUS}"
         ),
     }
 
