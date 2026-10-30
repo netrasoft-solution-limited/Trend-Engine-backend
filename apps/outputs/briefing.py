@@ -547,22 +547,27 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
             f"These are targeted examples, not a representative sample. Figures keep "
             f"their kind: a search estimate is a rolling monthly average, Shop counts are "
             f"global lifetime totals, engagement is cumulative.\n\n"
-            f"{_approvals(organization, developments, profiles)}\n\n{REVIEW_STATUS}"
+            f"{_approvals(organization, developments, profiles)} Expert review, publication "
+            f"and measurement are separate steps; see Review status above."
         ),
     }
 
 
 def _approvals(organization, developments, profiles) -> str:
-    """Who approved what, and when — from the records, not a stock sentence."""
+    """What was approved inside Pure Play, and when — from the records.
+
+    Dates only: the approver's label is free text typed into the review
+    screen ("Codex workflow test for Mark…") and is an internal note, not
+    something to print in a client document. The audit trail keeps who.
+    """
     lines = []
     for d in developments:
-        rec = d.recommendation
-        who = rec.decided_by_label or "an analyst"
-        when = f" on {rec.decided_at:%-d %B %Y}" if rec.decided_at else ""
-        lines.append(f"{d.signal.title}: approved by {who}{when}")
+        when = d.recommendation.decided_at
+        lines.append(f"{d.signal.title} (approved {when:%-d %B %Y})" if when else d.signal.title)
+    profile = ", ".join(sorted(profiles)) or "(unversioned)"
     return (
-        f"Approvals inside Pure Play, against {_possessive(organization.name)} profile "
-        f"{', '.join(sorted(profiles)) or '(unversioned)'}: " + "; ".join(lines) + "."
+        f"Each story and its recommendation were approved by a Pure Play analyst against "
+        f"{_possessive(organization.name)} profile {profile}: " + "; ".join(lines) + "."
     )
 
 
