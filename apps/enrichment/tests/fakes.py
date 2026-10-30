@@ -36,6 +36,8 @@ class FakeMessages:
         if self._outer.raises is not None:
             raise self._outer.raises
         response = self._outer.responses.pop(0) if self._outer.responses else FakeResponse()
+        if isinstance(response, Exception):
+            raise response
         return response
 
 
@@ -56,6 +58,20 @@ class FakeTransport:
         self.raises = raises
         self.calls: list[dict] = []
         self.messages = FakeMessages(self)
+
+
+def cut_off(text: str = '{"claims":[{"segment_ordinal":1,"kind":"mech') -> Exception:
+    """What the SDK raises when the answer stops part-way through its JSON."""
+    from pydantic import BaseModel, ValidationError
+
+    class Shape(BaseModel):
+        claims: list
+
+    try:
+        Shape.model_validate_json(text)
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected invalid JSON")
 
 
 def respond(parsed: Any, **usage) -> FakeResponse:

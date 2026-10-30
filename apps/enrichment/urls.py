@@ -12,4 +12,6 @@ urlpatterns = [
     path("runs/", views.RunListView.as_view(), name="ops-runs"),
     path("runs/<int:pk>/", views.RunDetailView.as_view(), name="ops-run"),
     path("items/<int:pk>/", views.ItemDetailView.as_view(), name="ops-item"),
+    path("items/<int:pk>/retry/", views.RetryAnalysisView.as_view(), name="ops-item-retry"),
+    path("runs/retry/", views.RetryAnalysisView.as_view(), name="ops-runs-retry"),
 ]

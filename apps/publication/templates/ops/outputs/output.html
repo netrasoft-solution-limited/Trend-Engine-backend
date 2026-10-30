@@ -22,15 +22,15 @@
         showed "Sent to the client" from a notification timestamp alone, with
         no delivery and nobody at the client receiving anything.{% endcomment %}
         {% if deliveries %}
-          Sent to {{ deliveries.0.recipients|length }} recipient(s) {{ deliveries.0.sent_at|date:"j M Y, H:i" }}
+          Sent for review to {{ deliveries.0.recipients|join:", " }} {{ deliveries.0.sent_at|date:"j M Y, H:i" }}
           by {{ deliveries.0.sent_by_label }} — see Sent below.
         {% elif live.notified_at %}
           <b>Not delivered.</b> A notification was recorded {{ live.notified_at|date:"j M Y, H:i" }},
-          but there is no delivery record: nothing shows that this reached anyone at the client.
+          but there is no delivery record: nothing shows that it was sent for review.
         {% else %}<b>Not sent yet.</b>{% endif %}
       {% else %}
         Nothing is published. Approving is an internal record; publishing is the
-        separate step that lets it be sent.
+        separate gate. Any version can be emailed to Pure Play for review below.
       {% endif %}
     </p>
   </div>
@@ -160,17 +160,24 @@
     {% endif %}
   </div>
 
-  {% if live %}
+  {% if latest %}
     <div class="card">
-      <span class="name">Send it to the client</span>
+      <span class="name">Email it for review</span>
       {% if recipients %}
         <p class="note">
-          Goes to {{ recipients|length }} contact(s):
-          {% for r in recipients %}{{ r.email }}{% if not forloop.last %}, {% endif %}{% endfor %}.
-          <a href="{% url 'ops-client-contacts' organization.slug %}">Change who →</a>
+          Goes only to {% for r in recipients %}{{ r.email }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+          Nothing is ever emailed to {{ organization.name }} or its contacts; onward delivery is Pure Play's.
+          {% if not live %}An unpublished version goes as a watermarked DRAFT, and the email states
+          whether expert review is pending.{% endif %}
         </p>
         <form method="post" action="{% url 'ops-output-deliver' output.pk %}">
           {% csrf_token %}
+          <label for="version">Version</label>
+          <select id="version" name="version">
+            {% for v in versions %}
+              <option value="{{ v.number }}">v{{ v.number }}{% if live and live.version_number == v.number %} (published){% else %} (draft){% endif %}</option>
+            {% endfor %}
+          </select>
           <label>Formats to attach</label>
           <div class="inline">
             {% for fmt, label in formats %}
@@ -182,17 +189,17 @@
           </div>
           <label for="note">A covering note, if you want one</label>
           <textarea id="note" name="note" placeholder="Flagging section two in particular."></textarea>
-          <div class="actions"><button type="submit">Send it</button></div>
+          <div class="actions"><button type="submit">Send for review</button></div>
         </form>
       {% else %}
         <p class="note" style="color:var(--bad)">
-          {{ organization.name }} has nobody set to receive outputs, so this
-          cannot be sent — a delivery to nobody would be recorded as sent.
-          <a href="{% url 'ops-client-contacts' organization.slug %}">Add a contact →</a>
+          No review address is configured, so nothing can be sent.
         </p>
       {% endif %}
     </div>
+  {% endif %}
 
+  {% if live %}
     <div class="card">
       <span class="name">Withdraw it</span>
       <p class="note">

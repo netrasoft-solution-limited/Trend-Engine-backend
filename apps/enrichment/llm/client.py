@@ -27,7 +27,7 @@ from decimal import Decimal
 from typing import Any, TypeVar
 
 from django.conf import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from apps.enrichment.models import ModelRun
 
@@ -48,6 +48,19 @@ class LLMUnavailable(RuntimeError):
 
 class LLMInvalidOutput(RuntimeError):
     """The model answered, but not in the shape the schema requires."""
+
+
+#: The words a cut-off answer is recorded with; `scoring.alerts` reads them.
+CUT_OFF = "Answer cut off before it finished"
+
+
+class LLMTruncated(LLMInvalidOutput):
+    """The answer stopped part-way, so its JSON never closed.
+
+    Found on 30 Oct: long podcast episodes came back as `{"claims":[...` cut
+    off mid-string. Retrying the same request gets the same cut, so callers
+    that can split their input (extraction) should, and the others fail it.
+    """
 
 
 @dataclass(frozen=True)
@@ -188,6 +201,28 @@ class LLMClient:
                 messages=[{"role": "user", "content": user}],
                 output_format=schema,
             )
+        except ValidationError as exc:
+            # The SDK validates the answer itself, so an answer that is not
+            # schema-valid JSON surfaces here rather than as `parsed_output is
+            # None`. The call was made and billed: record it with the best
+            # token estimate there is, because the response with its usage
+            # never reaches us.
+            answer = next((str(e.get("input", "")) for e in exc.errors()), "")
+            truncated = any(e.get("type") == "json_invalid" for e in exc.errors())
+            self._record(
+                purpose=purpose, outcome=ModelRun.Outcome.INVALID, tier=tier,
+                prompt_version=prompt_version, content_item=content_item,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=(
+                    f"{CUT_OFF if truncated else 'Answer did not match the schema'} after "
+                    f"{len(answer):,} characters (tokens estimated). {str(exc)[:1500]}"
+                ),
+                input_tokens=approx_input, output_tokens=len(answer) // 4,
+            )
+            raise (LLMTruncated if truncated else LLMInvalidOutput)(
+                f"{purpose}: the answer {'was cut off' if truncated else 'was not schema-valid'} "
+                f"after {len(answer):,} characters."
+            ) from exc
         except Exception as exc:
             self._record(
                 purpose=purpose, outcome=ModelRun.Outcome.ERRORED, tier=tier,

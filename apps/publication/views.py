@@ -325,39 +325,50 @@ class OutputWithdrawView(View):
 
 
 class OutputDeliverView(View):
+    """Email a version to Pure Play's review address — never to the client.
+
+    The live publication when there is one; otherwise the version chosen (the
+    latest by default), as a watermarked draft with its review status.
+    """
+
     def post(self, request, pk: int):
-        require_platform_admin(request, action="Delivering an output")
+        require_platform_admin(request, action="Sending an output for review")
         output, organization = _output(pk)
 
-        chosen = request.POST.getlist("formats") or list(exports.available())
+        chosen = request.POST.getlist("formats") or ["pdf", "docx"]
+        note = (request.POST.get("note") or "").strip()
+        number = request.POST.get("version") or ""
+
+        from . import delivery as delivery_service
 
         with scoped(organization):
             live = output.publications.filter(unpublished_at__isnull=True).first()
-            if live is None:
-                messages.error(
-                    request,
-                    "Publish it first. Delivery goes through the gate because an "
-                    "email cannot be recalled.",
-                )
-                return redirect(reverse("ops-output", args=[pk]))
-
-            from . import delivery as delivery_service
-
             try:
-                record = delivery_service.deliver(
-                    publication=live,
-                    formats=tuple(chosen),
-                    actor_label=_actor(request),
-                    note=(request.POST.get("note") or "").strip(),
-                )
+                if live is not None and (not number or int(number) == live.version_number):
+                    record = delivery_service.deliver(
+                        publication=live, formats=tuple(chosen),
+                        actor_label=_actor(request), note=note,
+                    )
+                    sent_to = record.recipients
+                else:
+                    versions = output.versions.order_by("-number")
+                    version = (
+                        get_object_or_404(versions, number=int(number)) if number.isdigit()
+                        else versions.first()
+                    )
+                    if version is None:
+                        raise delivery_service.DeliveryError("There is no version to send.")
+                    sent_to = delivery_service.send_for_review(
+                        version=version, formats=tuple(chosen),
+                        actor_label=_actor(request), note=note,
+                    )
             except delivery_service.DeliveryError as exc:
                 messages.error(request, str(exc))
                 return redirect(reverse("ops-output", args=[pk]))
 
         messages.success(
             request,
-            f"Sent to {len(record.recipients)} recipient(s): "
-            f"{', '.join(record.recipients)}.",
+            f"Sent for review to {', '.join(sent_to)}. Nothing was sent to {organization.name}.",
         )
         return redirect(reverse("ops-output", args=[pk]))
 

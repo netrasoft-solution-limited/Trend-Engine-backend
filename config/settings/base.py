@@ -302,6 +302,14 @@ PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:5173")
 #: header and footer. Blank exports unbranded documents.
 EXPORT_BRAND = env("EXPORT_BRAND", "Pure Play Ecommerce Consulting")
 
+# Who every brief, report, export and notice is emailed to: Pure Play's
+# reviewer, comma-separated. NEVER the client — Pure Play forwards onward
+# under its own name (Mark, 30 Oct). Client contacts are records only and are
+# not addressed by any email this system sends.
+OUTPUT_REVIEW_RECIPIENTS = [
+    a.strip() for a in env("OUTPUT_REVIEW_RECIPIENTS", "").split(",") if a.strip()
+]
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True

@@ -35,6 +35,42 @@ did we actually read?"; the table answers "what happened on each poll?".
     </p>
   </div>
 
+  {% if unanalysed %}
+    <div class="card" id="unanalysed">
+      <div class="row">
+        <span class="name">Transcribed but not analysed ({{ unanalysed|length }})</span>
+        <form method="post" action="{% url 'ops-runs-retry' %}" class="inline">
+          {% csrf_token %}
+          <button type="submit">Retry all</button>
+        </form>
+      </div>
+      <p class="note">
+        These items have a transcript and no claims, because the AI analysis failed
+        or never ran. They contribute nothing to signals or briefs until a retry works.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Published</th><th>Last error</th><th></th></tr></thead>
+          <tbody>
+            {% for item, error in unanalysed %}
+              <tr>
+                <td><a href="{% url 'ops-item' item.pk %}">{{ item.title|truncatechars:70 }}</a><br><span class="muted">{{ item.source.name }}</span></td>
+                <td>{{ item.published_at|date:"j M Y"|default:"—" }}</td>
+                <td class="muted">{{ error|truncatechars:160 }}</td>
+                <td>
+                  <form method="post" action="{% url 'ops-item-retry' item.pk %}" class="inline">
+                    {% csrf_token %}
+                    <button type="submit">Retry</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
   <div class="card">
     <form method="get" class="inline">
       <label for="source" style="margin:0">Source</label>

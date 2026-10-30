@@ -28,6 +28,16 @@ what it cost, and every claim with the moment it was said.
       <div class="stat"><b>{{ claims|length }}</b><span>claims</span></div>
       <div class="stat"><b>${{ total_cost|floatformat:3 }}</b><span>cost so far</span></div>
     </div>
+    {% if failed %}
+      <p class="note state unreadable">
+        <b>Not analysed.</b> The transcript is stored but the AI analysis has not
+        produced claims. Each attempt is listed under Model calls below.
+      </p>
+      <form method="post" action="{% url 'ops-item-retry' item.pk %}" class="inline">
+        {% csrf_token %}
+        <button type="submit">Retry the analysis</button>
+      </form>
+    {% endif %}
     {% if item.gate_reason %}<p class="note"><b>Why:</b> {{ item.gate_reason }}</p>{% endif %}
     <p class="note">
       Access basis: {% if item.policy %}{{ item.policy }}{% else %}<span class="state unreadable">none recorded</span>{% endif %}

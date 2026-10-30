@@ -77,11 +77,13 @@ def send_withdrawal_email(publication) -> int:
     return _send(
         [
             (
-                "A document we sent you has been withdrawn",
+                f"[Withdrawn] {publication.title}",
                 (
-                    f"“{publication.title}” has been withdrawn while it is corrected. "
-                    f"Please disregard the copy you were sent; a corrected version "
-                    f"will follow.\n"
+                    f"“{publication.title}” (v{publication.version_number}) has been "
+                    f"withdrawn while it is corrected. If you forwarded it to "
+                    f"{publication.organization.name}, please let them know; nothing "
+                    f"was sent to them from this system. A corrected version will "
+                    f"follow.\n"
                 ),
                 None,
                 [recipient.email],

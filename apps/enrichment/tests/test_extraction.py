@@ -16,7 +16,7 @@ from apps.enrichment.models import Claim, ModelRun, Question
 from apps.evidence.models import ContentItem, TranscriptArtifact
 from apps.sources.models import Source
 
-from .fakes import FakeTransport, respond
+from .fakes import FakeTransport, cut_off, respond
 
 pytestmark = pytest.mark.django_db
 
@@ -238,3 +238,80 @@ def test_extraction_uses_the_middle_tier_and_records_the_run(item):
     run = ModelRun.objects.get(purpose=ModelRun.Purpose.EXTRACTION)
     assert run.model == "claude-sonnet-5-5"
     assert run.prompt_version == extraction.PROMPT_VERSION
+
+
+# ── Long episodes and failed calls (item 77, 30 Oct) ─────────────────────────
+
+
+def _claim(ordinal: int, quote: str) -> extraction.ExtractedClaim:
+    return extraction.ExtractedClaim(
+        segment_ordinal=ordinal, kind="effect", subject="creatine", text=quote,
+        quote=quote, is_cited=False, is_sponsored=False,
+    )
+
+
+def test_a_cut_off_answer_is_asked_again_in_halves(item, monkeypatch):
+    """The answer for the whole batch stopped part-way; each half fits."""
+    monkeypatch.setattr(extraction, "SEGMENT_CHARS", 60)
+    segments = extraction.build_segments(item)
+    assert len(segments) >= 2
+    half = len(segments) // 2
+    transport = FakeTransport([
+        cut_off(),
+        respond(extraction.Extraction(claims=[_claim(1, segments[0].text[:20])])),
+        respond(extraction.Extraction(claims=[_claim(half + 1, segments[half].text[:20])])),
+    ])
+
+    result = extraction.extract(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
+
+    assert result.claims == 2 and not result.failed
+    assert len(transport.calls) == 3
+    outcomes = list(ModelRun.objects.order_by("at").values_list("outcome", flat=True))
+    assert outcomes == ["invalid", "succeeded", "succeeded"]
+
+
+def test_long_transcripts_are_sent_in_batches(item, monkeypatch):
+    monkeypatch.setattr(extraction, "SEGMENT_CHARS", 60)
+    monkeypatch.setattr(extraction, "BATCH_CHARS", 100)
+    segments = extraction.build_segments(item)
+    transport = FakeTransport([respond(extraction.Extraction()) for _ in segments])
+
+    extraction.extract(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
+
+    assert 1 < len(transport.calls) <= len(segments)
+    sent = "".join(call["messages"][0]["content"] for call in transport.calls)
+    assert all(s.text in sent for s in segments)
+
+
+def test_a_failed_extraction_is_recorded_listed_and_stores_nothing(item, monkeypatch):
+    """The failed call used to vanish with the rolled-back transaction."""
+    from apps.enrichment import failures
+
+    item.gate_decision = ContentItem.GateDecision.RELEVANT
+    item.save()
+    transport = FakeTransport([cut_off()])  # one segment: nothing left to split
+
+    result = extraction.extract(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
+
+    assert result.failed and result.claims == 0
+    run = ModelRun.objects.get()
+    assert run.outcome == "invalid" and "cut off" in run.error
+    assert run.output_tokens > 0  # billed, so estimated rather than left at zero
+    assert list(failures.unanalysed()) == [item]
+    assert "cut off" in failures.last_error(item)
+
+
+def test_a_partly_failed_item_stores_nothing_so_a_retry_can_run(item, monkeypatch):
+    monkeypatch.setattr(extraction, "SEGMENT_CHARS", 60)
+    monkeypatch.setattr(extraction, "BATCH_CHARS", 100)
+    segments = extraction.build_segments(item)
+    transport = FakeTransport(
+        [respond(extraction.Extraction(claims=[_claim(1, segments[0].text[:20])]))]
+        + [RuntimeError("overloaded")] * 10
+    )
+
+    with pytest.raises(RuntimeError):
+        extraction.extract(item, domain_pack=DOMAIN, client=LLMClient(transport=transport))
+
+    assert not Claim.objects.exists()
+    assert ModelRun.objects.filter(outcome="errored").exists()

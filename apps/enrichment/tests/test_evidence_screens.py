@@ -266,3 +266,52 @@ def test_an_item_says_when_it_is_the_same_conversation_as_another(
     assert "Same conversation as" in page and "98%" in page
     assert "adds no item, creator or source type" in page
     assert "Also published as" in original
+
+
+# ── Items that failed analysis (item 77, 30 Oct) ─────────────────────────────
+
+
+@pytest.fixture
+def unanalysed(run):
+    item = _item(
+        run, "ep-77",
+        gate_decision=ContentItem.GateDecision.RELEVANT,
+        content_state=ContentItem.ContentState.TRANSCRIBED,
+    )
+    TranscriptArtifact.objects.create(
+        content_item=item, method=TranscriptArtifact.Method.PUBLISHER, text="Words."
+    )
+    ModelRun.objects.create(
+        purpose="extraction", outcome="invalid", model="claude-sonnet-5-5",
+        prompt_version="t", content_item=item,
+        error="Answer cut off before it finished after 6,831 characters",
+    )
+    return item
+
+
+def test_a_failed_item_is_listed_on_runs_and_bannered(client, operator, unanalysed):
+    client.force_login(operator)
+    response = client.get(reverse("ops-runs"))
+    page = response.content.decode()
+    assert "Transcribed but not analysed (1)" in page
+    assert "1 transcribed item(s) have not been analysed" in page
+    assert "cut off part-way" in page
+
+
+def test_retry_queues_the_analysis(client, operator, unanalysed, monkeypatch):
+    from apps.enrichment import tasks
+
+    queued = []
+    monkeypatch.setattr(tasks.extract_evidence, "delay", queued.append)
+    client.force_login(operator)
+
+    response = client.post(reverse("ops-item-retry", args=[unanalysed.pk]))
+
+    assert response.status_code == 302
+    assert queued == [unanalysed.pk]
+
+
+def test_an_item_with_claims_is_not_listed(client, operator, transcribed, monkeypatch):
+    from apps.enrichment import failures
+
+    assert transcribed not in failures.unanalysed()

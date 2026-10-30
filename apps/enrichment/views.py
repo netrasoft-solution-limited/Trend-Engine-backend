@@ -14,19 +14,23 @@ items, transcripts and claims all at once. Placing the screen here is the
 contract being right: a page about what was understood belongs with the
 understanding.
 
-Read-only, and open to any signed-in operator rather than Platform Admin alone.
-Reviewing evidence is the Operator role's job (PRD §3.2); nothing here changes
-anything. Everything is global evidence — no tenant is bound or needed.
+Open to any signed-in operator rather than Platform Admin alone. Reviewing
+evidence is the Operator role's job (PRD §3.2). The one action is retrying the
+analysis of an item that failed it, which spends one model call per batch and
+changes nothing already stored. Everything is global evidence — no tenant is
+bound or needed.
 """
 from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count, DecimalField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 
@@ -34,6 +38,7 @@ from apps.evidence.models import ContentItem
 from apps.ingestion.models import IngestionRun
 from apps.sources.models import Source
 
+from . import failures
 from .models import Claim, ModelRun
 
 #: Runs per page. A source polled every hour fills a day with 24; this is
@@ -190,6 +195,9 @@ class RunListView(View):
                 "sources": Source.objects.order_by("name"),
                 "coverage": coverage_since(since),
                 "coverage_days": COVERAGE_DAYS,
+                "unanalysed": [
+                    (item, failures.last_error(item)) for item in failures.unanalysed()[:50]
+                ],
             },
         )
 
@@ -243,8 +251,36 @@ class ItemDetailView(View):
                 "model_runs": list(ModelRun.objects.filter(content_item=item).order_by("at")),
                 "claims": claims,
                 "total_cost": _item_cost(item),
+                "failed": failures.unanalysed().filter(pk=item.pk).exists(),
             },
         )
+
+
+class RetryAnalysisView(View):
+    """Ask the model again for one item, or for every item that failed.
+
+    Queued rather than run in the request: a long episode is several calls and
+    can take minutes. The item page shows the outcome when it lands.
+    """
+
+    def post(self, request, pk: int | None = None):
+        from .tasks import extract_evidence
+
+        items = failures.unanalysed()
+        if pk is not None:
+            items = items.filter(pk=pk)
+        queued = [item.pk for item in items]
+        for item_pk in queued:
+            extract_evidence.delay(item_pk)
+        if queued:
+            messages.success(
+                request,
+                f"Analysis queued for {len(queued)} item(s). Refresh in a few minutes; "
+                "each item shows its claims, or the reason it failed again.",
+            )
+        else:
+            messages.info(request, "Nothing is waiting to be retried.")
+        return redirect(reverse("ops-item", args=[pk]) if pk else reverse("ops-runs"))
 
 
 def _timestamp(seconds: float | None) -> str:

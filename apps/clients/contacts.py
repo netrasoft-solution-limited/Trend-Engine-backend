@@ -1,4 +1,10 @@
-"""Who to send a client's work to.
+"""Who to send a client's work to — which is never the client.
+
+Mark, 30 October: "all briefs, reports, exports and automated email
+deliveries go only to me for review. Never email Jarrow or any client contact
+directly." So `recipients_for` answers with `OUTPUT_REVIEW_RECIPIENTS` from
+settings, whatever the organisation, and client contacts are a record of who
+Pure Play forwards to, not an address list this system mails.
 
 One function, because it is the single place that answers "who is this going
 to?" and that question should have exactly one answer. The publication notice
@@ -14,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from email.utils import parseaddr
 
 from .models import ClientContact
 
@@ -32,32 +39,44 @@ class Recipient:
 
 
 def recipients_for(organization) -> list[Recipient]:
-    """Everyone at this client who should receive outputs.
+    """Who outputs about this client are emailed to: Pure Play's reviewer.
 
-    An empty list is a meaningful answer, not an error — callers decide what to
-    do with it, and `publication.delivery` refuses to send on one rather than
-    reporting a successful delivery to nobody.
+    The organisation is taken so callers read naturally, and is deliberately
+    unused for addressing. An empty list is a meaningful answer, not an error —
+    `publication.delivery` refuses to send on one rather than reporting a
+    successful delivery to nobody.
     """
-    rows = (
-        ClientContact.objects.filter(
-            organization=organization, is_active=True, receives_outputs=True
-        )
-        .order_by("name", "email")
-    )
+    from django.conf import settings
 
-    seen: set[str] = set()
     recipients: list[Recipient] = []
-    for row in rows:
-        # The unique constraint already prevents this per organisation; the
-        # guard is here because a caller may one day merge two clients' lists.
-        if row.email in seen:
+    seen: set[str] = set()
+    for entry in getattr(settings, "OUTPUT_REVIEW_RECIPIENTS", []):
+        name, email = parseaddr(entry)
+        email = email.strip().lower()
+        if "@" not in email or email in seen:
             continue
-        seen.add(row.email)
-        recipients.append(Recipient(name=row.name, email=row.email))
+        if is_client_contact(email):
+            # A client address put into the setting by mistake is exactly the
+            # disclosure this exists to prevent, so it is dropped, loudly.
+            logger.error("%s is a client contact; outputs are never emailed to it", email)
+            continue
+        seen.add(email)
+        recipients.append(Recipient(name=name, email=email))
 
     if not recipients:
-        logger.warning("%s has no active contacts who receive outputs", organization)
+        logger.warning(
+            "OUTPUT_REVIEW_RECIPIENTS is empty: outputs for %s cannot be sent", organization
+        )
     return recipients
+
+
+def is_client_contact(email: str) -> bool:
+    """Whether an address belongs to any client's contacts — the backstop the
+    senders check before anything leaves."""
+    from apps.tenancy.context import operator_scope
+
+    with operator_scope():
+        return ClientContact.objects.filter(email__iexact=email.strip()).exists()
 
 
 def addresses_for(organization) -> list[str]:

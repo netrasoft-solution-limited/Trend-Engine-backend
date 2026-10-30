@@ -28,6 +28,7 @@ from apps.evidence.models import ContentItem, ContentSegment
 from .llm.client import (
     LLMClient,
     LLMInvalidOutput,
+    LLMTruncated,
     LLMUnavailable,
     cached_system,
     extraction_tier,
@@ -43,6 +44,11 @@ PROMPT_VERSION = "extraction/2026-09-29"
 #: quote resolves to a useful location, large enough that a claim spanning two
 #: sentences is not split down the middle.
 SEGMENT_CHARS = 1200
+
+#: Transcript characters sent in one call. A full episode in one call came back
+#: cut off part-way (30 Oct, item 77), so long transcripts go in batches, and a
+#: batch whose answer is still cut off is split in half and asked again.
+BATCH_CHARS = 20000
 
 
 class ExtractedClaim(BaseModel):
@@ -72,6 +78,7 @@ class ExtractionResult:
     questions: int
     dropped_unanchored: int
     skipped: str = ""
+    failed: bool = False
 
 
 INSTRUCTIONS = """You extract structured evidence from transcripts for a category \
@@ -97,13 +104,14 @@ Return an empty list rather than inventing content. Many segments contain \
 nothing extractable, and that is a correct answer."""
 
 
-def _segment(text: str, size: int = SEGMENT_CHARS) -> list[tuple[int, int, str]]:
+def _segment(text: str, size: int | None = None) -> list[tuple[int, int, str]]:
     """Split text into (start_char, end_char, body).
 
     Breaks on sentence boundaries where one is near the target, so a quote is
     unlikely to straddle two segments. Offsets are into the ORIGINAL string, so
     a span survives re-segmentation at a different size later.
     """
+    size = size or SEGMENT_CHARS
     chunks: list[tuple[int, int, str]] = []
     position = 0
     length = len(text)
@@ -186,6 +194,19 @@ def _render(segments: list[ContentSegment]) -> str:
     return "\n\n".join(f"[segment {s.ordinal}]\n{s.text}" for s in segments)
 
 
+def _batches(segments: list[ContentSegment]) -> list[list[ContentSegment]]:
+    """Consecutive segments, up to `BATCH_CHARS` of text per batch."""
+    batches: list[list[ContentSegment]] = [[]]
+    size = 0
+    for segment in segments:
+        if batches[-1] and size + len(segment.text) > BATCH_CHARS:
+            batches.append([])
+            size = 0
+        batches[-1].append(segment)
+        size += len(segment.text)
+    return batches
+
+
 def _anchored(quote: str, segment: ContentSegment) -> bool:
     """Whether the quote really appears in the segment it names.
 
@@ -198,7 +219,6 @@ def _anchored(quote: str, segment: ContentSegment) -> bool:
     return normalise(quote) in normalise(segment.text)
 
 
-@transaction.atomic
 def extract(
     item: ContentItem,
     *,
@@ -210,6 +230,11 @@ def extract(
     Skips — without calling the model — when the item is metadata-only, when it
     has no transcript, or when it has already been extracted. Each of those is
     a case where calling would spend money to learn nothing.
+
+    Not one transaction: the model runs must outlive a failure, or a failed
+    extraction leaves no trace in Runs (it did, until 30 Oct). Only the writes
+    of claims and questions are atomic, and they happen only when every batch
+    succeeded — a half-extracted item would count as extracted and never retry.
     """
     if item.is_metadata_only:
         # Arch §7.1: metadata-only items are surfaced honestly as such and are
@@ -233,20 +258,40 @@ def extract(
 
     by_ordinal = {s.ordinal: s for s in segments}
     llm = client or LLMClient()
+    system = cached_system(f"{INSTRUCTIONS}\n\n## The domain\n\n{domain_pack}")
 
+    def ask(batch: list[ContentSegment]) -> Extraction:
+        try:
+            return llm.structured(
+                schema=Extraction,
+                tier=extraction_tier(),
+                purpose="extraction",
+                prompt_version=PROMPT_VERSION,
+                system=system,
+                user=_render(batch),
+                content_item=item,
+            )
+        except LLMTruncated:
+            if len(batch) < 2:
+                raise
+            half = len(batch) // 2
+            first, second = ask(batch[:half]), ask(batch[half:])
+            return Extraction(
+                claims=first.claims + second.claims,
+                questions=first.questions + second.questions,
+            )
+
+    parts: list[Extraction] = []
     try:
-        result = llm.structured(
-            schema=Extraction,
-            tier=extraction_tier(),
-            purpose="extraction",
-            prompt_version=PROMPT_VERSION,
-            system=cached_system(f"{INSTRUCTIONS}\n\n## The domain\n\n{domain_pack}"),
-            user=_render(segments),
-            content_item=item,
-        )
+        for batch in _batches(segments):
+            parts.append(ask(batch))
     except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
         logger.warning("Extraction failed for %s: %s", item.pk, exc)
-        return ExtractionResult(0, 0, 0, skipped=str(exc))
+        return ExtractionResult(0, 0, 0, skipped=str(exc), failed=True)
+    result = Extraction(
+        claims=[c for p in parts for c in p.claims],
+        questions=[q for p in parts for q in p.questions],
+    )
 
     kinds = {choice for choice, _ in Claim.Kind.choices}
     claims: list[Claim] = []
@@ -286,8 +331,9 @@ def extract(
         if q.segment_ordinal in by_ordinal
     ]
 
-    Claim.objects.bulk_create(claims)
-    Question.objects.bulk_create(questions)
+    with transaction.atomic():
+        Claim.objects.bulk_create(claims)
+        Question.objects.bulk_create(questions)
 
     if dropped:
         logger.warning(

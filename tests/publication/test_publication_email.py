@@ -39,12 +39,15 @@ def contact(organization, name, email, **overrides):
 
 
 @pytest.fixture
-def readers(organization):
+def readers(organization, settings):
     """Two who should hear, and two who should not."""
     contact(organization, "Mark", "mark@jarrow.example")
     contact(organization, "Dana", "dana@jarrow.example")
     contact(organization, "Finance", "ap@jarrow.example", receives_outputs=False)
     contact(organization, "Departed", "old@jarrow.example", is_active=False)
+    # Pure Play's reviewers: the only addresses anything is emailed to. The
+    # client contacts above are records and must never be addressed.
+    settings.OUTPUT_REVIEW_RECIPIENTS = ["Mark <mark@pureplay.example>", "dana@pureplay.example"]
 
 
 def publish(version, organization, operator, callbacks):
@@ -86,10 +89,10 @@ def test_publishing_does_not_claim_the_client_was_notified(
     assert publication.notified_at is None
 
 
-# ── Withdrawal still reaches the client ─────────────────────────────────────
+# ── Withdrawal reaches the reviewer, never the client ─────────────────────────────────────
 
 
-def test_withdrawing_tells_every_contact_who_receives_outputs(
+def test_withdrawing_tells_every_reviewer(
     approved_version, organization, operator, readers, django_capture_on_commit_callbacks
 ):
     publication = publish(
@@ -97,7 +100,7 @@ def test_withdrawing_tells_every_contact_who_receives_outputs(
     )
     withdraw(publication, operator, django_capture_on_commit_callbacks)
 
-    assert [m.to for m in mail.outbox] == [["dana@jarrow.example"], ["mark@jarrow.example"]]
+    assert [m.to for m in mail.outbox] == [["mark@pureplay.example"], ["dana@pureplay.example"]]
 
 
 def test_each_recipient_gets_their_own_message(

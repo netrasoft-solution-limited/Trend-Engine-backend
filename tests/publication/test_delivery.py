@@ -28,7 +28,7 @@ PLAIN = ("markdown", "csv")
 
 
 @pytest.fixture
-def readers(organization):
+def readers(organization, settings):
     with operator_scope():
         ClientContact.objects.create(
             organization=organization, name="Mark", email="mark@jarrow.example"
@@ -40,6 +40,9 @@ def readers(organization):
             organization=organization, name="Accounts", email="ap@jarrow.example",
             receives_outputs=False,
         )
+    # Pure Play's reviewers: the only addresses anything is emailed to. The
+    # client contacts above are records and must never be addressed.
+    settings.OUTPUT_REVIEW_RECIPIENTS = ["Mark <mark@pureplay.example>", "dana@pureplay.example"]
 
 
 @pytest.fixture
@@ -83,7 +86,7 @@ def test_a_client_with_nobody_to_send_to_is_refused(
 ):
     """No `readers` fixture. A delivery to nobody succeeds and is then
     remembered as a delivery, which is much harder to notice than a failure."""
-    with pytest.raises(delivery_service.DeliveryError, match="nobody set to receive"):
+    with pytest.raises(delivery_service.DeliveryError, match="No review address is configured"):
         send(live, operator, django_capture_on_commit_callbacks)
 
     with operator_scope():
@@ -172,7 +175,7 @@ def test_a_delivery_records_who_it_went_to(
 ):
     record = send(live, operator, django_capture_on_commit_callbacks)
 
-    assert sorted(record.recipients) == ["dana@jarrow.example", "mark@jarrow.example"]
+    assert sorted(record.recipients) == ["dana@pureplay.example", "mark@pureplay.example"]
     assert record.formats == list(PLAIN)
     assert record.sent_by_label == operator.email
 
@@ -185,10 +188,10 @@ def test_the_recipients_survive_a_contact_being_removed(
     record = send(live, operator, django_capture_on_commit_callbacks)
 
     with operator_scope():
-        ClientContact.objects.filter(email="dana@jarrow.example").delete()
+        ClientContact.objects.filter(email="dana@pureplay.example").delete()
         record.refresh_from_db()
 
-    assert "dana@jarrow.example" in record.recipients
+    assert "dana@pureplay.example" in record.recipients
 
 
 def test_an_export_artifact_is_written_per_format(
@@ -213,10 +216,10 @@ def test_the_delivery_is_audited_as_an_export_event(
     with operator_scope():
         event = AuditEvent.objects.filter(kind=AuditEvent.Kind.EXPORT).first()
     assert event is not None
-    assert "2 recipient(s)" in event.message
+    assert "for review to mark@pureplay.example" in event.message
     assert sorted(event.context["recipients"]) == [
-        "dana@jarrow.example",
-        "mark@jarrow.example",
+        "dana@pureplay.example",
+        "mark@pureplay.example",
     ]
 
 
@@ -293,3 +296,42 @@ def test_withdrawing_something_never_delivered_says_nothing_about_recall(
         ).first()
     assert "cannot be recalled" not in event.message
     assert event.context["delivered_to"] == []
+
+
+
+def test_client_contacts_are_never_emailed(
+    live, operator, readers, django_capture_on_commit_callbacks
+):
+    """Mark, 30 Oct: everything goes only to him; never to Jarrow."""
+    send(live, operator, django_capture_on_commit_callbacks)
+
+    addressed = [address for message in mail.outbox for address in message.to]
+    assert addressed and not any("jarrow" in address for address in addressed)
+    assert all("[For review]" in m.subject for m in mail.outbox)
+    assert all("has not been sent to" in m.body for m in mail.outbox)
+
+
+def test_a_client_address_in_the_review_setting_is_dropped(
+    live, operator, readers, settings, django_capture_on_commit_callbacks
+):
+    settings.OUTPUT_REVIEW_RECIPIENTS = ["mark@pureplay.example", "dana@jarrow.example"]
+    send(live, operator, django_capture_on_commit_callbacks)
+
+    assert [a for m in mail.outbox for a in m.to] == ["mark@pureplay.example"]
+
+
+def test_a_draft_can_be_sent_for_review_before_publication(
+    approved_version, operator, readers, django_capture_on_commit_callbacks
+):
+    """Expert review pending, nothing published: still usable, and labelled."""
+    with operator_scope(), django_capture_on_commit_callbacks(execute=True):
+        sent = delivery_service.send_for_review(
+            version=approved_version, formats=PLAIN, actor_label=operator.email
+        )
+
+    assert sorted(sent) == ["dana@pureplay.example", "mark@pureplay.example"]
+    body = mail.outbox[0].body
+    assert "not published" in body and "Expert review: pending" in body
+    with operator_scope():
+        assert all(a.was_draft for a in ExportArtifact.objects.all())
+        assert Delivery.objects.count() == 0

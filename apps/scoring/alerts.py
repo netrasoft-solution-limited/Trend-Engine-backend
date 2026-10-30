@@ -7,6 +7,7 @@ next successful run clears it, so the banner never needs dismissing.
 """
 from __future__ import annotations
 
+from apps.enrichment import failures
 from apps.enrichment.models import ModelRun
 from apps.ingestion.models import IngestionRun
 from apps.sources.models import Source
@@ -16,6 +17,7 @@ PLAIN = (
     ("credit balance is too low", "the Anthropic account is out of credit — top it up"),
     ("build-not-found", "the collector build no longer exists"),
     ("invalid x-api-key", "the API key was rejected"),
+    ("cut off before it finished", "the AI answer was cut off part-way"),
     ("401", "the provider rejected our credentials"),
 )
 
@@ -56,5 +58,16 @@ def problems() -> list[dict]:
             "why": _plain(latest.error or ""),
             "since": failing.order_by("at").first().at,
             "count": failing.filter(outcome=ModelRun.Outcome.ERRORED).count(),
+        })
+
+    stuck = list(failures.unanalysed()[:50])
+    if stuck:
+        found.append({
+            "what": f"{len(stuck)} transcribed item(s) have not been analysed",
+            "why": _plain(failures.last_error(stuck[0])),
+            "since": min((i.transcript.created_at for i in stuck), default=None),
+            "count": len(stuck),
+            "unit": "item",
+            "anchor": "#unanalysed",
         })
     return found
