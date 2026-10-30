@@ -12,6 +12,7 @@ The nav bar at the top of every page has: Triage · Clients · Outputs · Source
 
 ## 1. Keep the catalogue current (when Jarrow's range changes)
 
+0. After a catalogue change, a developer runs `manage.py describe_catalogue jarrow --activate` once: each listing gets Jarrow's own product description, so drafts describe products exactly as Jarrow does.
 1. **Clients → Jarrow Formulas → Import a product list or profile** (**MANUAL**). Upload the full-portfolio CSV. Any sheet with `product` and `primary_listening_family` columns is recognised as a catalogue inventory.
    - Each listing is assigned to its family.
    - The live profile's audiences, priorities, competitors and any words you added to a listing by hand are kept.
@@ -38,6 +39,7 @@ The nav bar at the top of every page has: Triage · Clients · Outputs · Source
   - If any row is wrong, nothing is imported, and you're told which rows to fix.
 
 **Runs** shows every collection and AI call with its result.
+- **Transcribed but not analysed** (top of Runs): any episode whose AI analysis failed or never ran, with the reason. **Retry** one, or **Retry all**. The red banner names them until a retry works. Long episodes are analysed in parts automatically; an answer that is cut off is split and asked again.
 
 ## 3. Find what matters (Triage)
 
@@ -88,7 +90,10 @@ Then:
    - The catalogue gap check runs at once: "not found in N listings", or the listings that match and where.
    - Record Jarrow's own check of retail-only lines and the pipeline when it comes back.
 2. **Adjacent listings:** suggested from the theme; edit as needed.
-3. **Observations** (**MANUAL**): attach by number.
+3. **Observations**:
+   - **Add collected podcasts and videos that name it**: every analysed episode from the last 30 days that mentions the candidate or one of its other names is attached as an observation, with its link, date and quote. No copying by hand.
+   - Attach hand-entered observations (Reddit, TikTok Shop, search, Trends) by number (**MANUAL**).
+   - Any new evidence withdraws approval, so read it before approving again.
 4. **The case:**
    - **Draft from the observations** (one AI call), or write it yourself.
    - Set the status (**Test now / Investigate next / Keep on watch**) and priority (**MANUAL**: commercial judgement, not a score).
@@ -114,7 +119,8 @@ Then:
      - Every download is listed under **Downloads**.
 3. **Approve** a version (**MANUAL**). This is an internal record only; nothing is visible to Jarrow.
 4. **Expert sign-off** (**MANUAL**, health and scientific outputs): add the reviewer once under **Outputs → Expert reviewers**, then record their sign-off on the output. The operator recording it cannot be the reviewer.
-5. **Publish** (**MANUAL**). Then **Send it to the client** (**MANUAL**). "Sent" shows only when a delivery is recorded.
+5. **Email it for review** (**MANUAL**): any version, published or draft, as PDF and Word, to Pure Play's review address only (`OUTPUT_REVIEW_RECIPIENTS`, set to Mark). Nothing is ever emailed to Jarrow or any client contact; onward delivery is Pure Play's. A draft goes watermarked DRAFT and the email states whether expert review is pending.
+6. **Publish** (**MANUAL**) when expert review is done. Publishing is an internal gate.
 
 ## 8. Next month
 
