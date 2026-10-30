@@ -101,3 +101,20 @@ def test_marks_full_inventory_loads_as_a_draft_profile():
         assert version.assets.filter(kind="category").count() == 14
         gut = version.assets.get(name="Gut & Protein Optimizer")
     assert "https://jarrow.com/products/gut-protein-optimizer" in gut.notes
+
+
+@pytest.mark.django_db
+def test_a_new_profile_version_keeps_each_listings_family():
+    """A copied version lost every family, and with it the brief's portfolio
+    table (found 30 Oct, after adding manufacturer descriptions)."""
+    from apps.clients.models import ClientAsset
+
+    with operator_scope():
+        org = Organization.objects.create(name="Brand", slug="brand")
+    with scoped(org):
+        first = services.draft(org, actor_label="test", copy_current=False)
+        ClientAsset.objects.create(organization=org, profile=first, name="Gut Optimizer",
+                                   family="Digestion and protein")
+        services.activate(first, actor_label="test")
+        second = services.draft(org, actor_label="test")
+        assert second.assets.get().family == "Digestion and protein"

@@ -91,6 +91,7 @@ def _clone_contents(source: ClientProfileVersion, target: ClientProfileVersion) 
                 terms=list(asset.terms),
                 weight=asset.weight,
                 notes=asset.notes,
+                family=asset.family,
             )
             for asset in source.assets.all()
         ]
