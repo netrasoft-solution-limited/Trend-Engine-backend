@@ -566,8 +566,8 @@ def _approvals(organization, developments, profiles) -> str:
         lines.append(f"{d.signal.title} (approved {when:%-d %B %Y})" if when else d.signal.title)
     profile = ", ".join(sorted(profiles)) or "(unversioned)"
     return (
-        f"Each story and its recommendation were approved by a Pure Play analyst against "
-        f"{_possessive(organization.name)} profile {profile}: " + "; ".join(lines) + "."
+        f"Each story and its recommendation were approved in Pure Play's internal review "
+        f"against {_possessive(organization.name)} profile {profile}: " + "; ".join(lines) + "."
     )
 
 

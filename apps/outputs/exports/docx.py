@@ -131,6 +131,7 @@ def _running(paragraph, text: str) -> None:
 def _add_table(doc, block) -> None:
     table = doc.add_table(rows=1 + len(block.rows), cols=len(block.header))
     table.style = "Table Grid"
+    _size_columns(doc, table, block)
     for r, row in enumerate((block.header, *block.rows)):
         _paginate(table.rows[r], header=r == 0)
         for c, text in enumerate(row):
@@ -140,6 +141,36 @@ def _add_table(doc, block) -> None:
                 run.font.size = Pt(9.5)
                 run.bold = r == 0 or None
     doc.add_paragraph()
+
+
+def _size_columns(doc, table, block) -> None:
+    """Give each column a share of the page in proportion to what it holds.
+
+    Word otherwise splits the page equally, so a one-word "Status" column was
+    as wide as the action text beside it (Mark, 30 Oct). The average visible
+    length, not the longest cell, so one long entry does not take the page;
+    the floor keeps a short column readable.
+    """
+    section = doc.sections[-1]
+    page = section.page_width - section.left_margin - section.right_margin
+    rows = (block.header, *block.rows)
+    weights = []
+    for c in range(len(block.header)):
+        cells = [_visible(row[c]) for row in rows if c < len(row)]
+        weights.append(max(MIN_WEIGHT, sum(len(t) for t in cells) / len(cells)))
+    table.autofit = False
+    for c, weight in enumerate(weights):
+        width = int(page * weight / sum(weights))
+        table.columns[c].width = width
+        for cell in table.columns[c].cells:
+            cell.width = width
+
+
+MIN_WEIGHT = 10
+
+
+def _visible(text: str) -> str:
+    return "".join(span.text for span in spans(text))
 
 
 def _paginate(row, *, header: bool) -> None:

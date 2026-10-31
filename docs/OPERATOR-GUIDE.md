@@ -23,7 +23,7 @@ The nav bar at the top of every page has: Triage · Clients · Outputs · Source
 
 **Automatic:**
 - Podcasts are collected weekly.
-- YouTube searches run daily, limited to videos uploaded in the last 30 days.
+- YouTube searches run weekly, limited to videos uploaded in the last 30 days. **Collect now** on a source runs one at once.
 - Each new item passes a cheap relevance check. Relevant items are transcribed and their claims extracted with timestamps.
 - Sponsored segments are marked and left out.
 - The same conversation published twice (a podcast and its video, or a clip) counts once.

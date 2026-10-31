@@ -569,3 +569,22 @@ def test_word_tables_keep_rows_whole_and_repeat_their_header():
     xml = zipfile.ZipFile(io.BytesIO(rendered.content)).read("word/document.xml").decode()
     assert xml.count("<w:cantSplit/>") == 3
     assert xml.count("<w:tblHeader/>") == 1
+
+
+def test_word_table_columns_are_sized_to_their_contents():
+    """Mark, 30 Oct: every column was the same width, whatever it held."""
+    import io
+
+    from docx import Document
+
+    from apps.outputs import exports
+    from apps.outputs.exports.document import document_from_body
+
+    long = "Run a four-week retail test with two listings and measure repeat orders"
+    document = document_from_body(
+        title="T", type_label="Brief", organization_name="Org",
+        body=[{"heading": "Table", "text": f"| Status | Action |\n| Test | {long} |"}],
+    )
+    word = Document(io.BytesIO(exports.render(document, "docx").content))
+    status, action = word.tables[0].columns
+    assert action.width > 2 * status.width
