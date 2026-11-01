@@ -138,10 +138,19 @@ def test_a_source_without_an_access_basis_is_refused(podcast):
 def test_a_route_with_no_collector_names_itself(policy):
     """Returning zero items would look exactly like a quiet publisher."""
     source = Source.objects.create(
+        name="A paper", route=Source.Route.RESEARCH, policy=policy, config={"queries": ["x"]}
+    )
+
+    with pytest.raises(NotCollectable, match="research"):
+        collect(source)
+
+
+def test_a_social_source_without_a_platform_says_so(policy):
+    source = Source.objects.create(
         name="A feed", route=Source.Route.SOCIAL, policy=policy, config={"queries": ["x"]}
     )
 
-    with pytest.raises(NotCollectable, match="social"):
+    with pytest.raises(NotCollectable, match="platform"):
         collect(source)
 
 

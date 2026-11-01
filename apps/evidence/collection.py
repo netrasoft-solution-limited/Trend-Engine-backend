@@ -92,6 +92,68 @@ def _youtube(source: Source, limit: int) -> list[dict]:
     )
 
 
+#: The research window every brief states. Older posts are left out at
+#: collection, so they are never gated, transcribed or paid for again.
+WINDOW_DAYS = 30
+#: Pure Play's budget model: two search pages per topic and platform.
+SOCIAL_PAGES = 2
+
+
+def _social(source: Source, limit: int) -> list[dict]:
+    """TikTok and Instagram Reels through Virlo; Reddit through Apify.
+
+    Mark, 31 Oct: preserve links, publication and collection dates and
+    engagement counts; keep only the research window; deduplicate by platform
+    and video id (`ingest_rows`, across every social source).
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.connectors.factory import apify_for, virlo_for
+    from apps.connectors.providers.apify import REDDIT
+
+    config = source.config or {}
+    platform = (config.get("platform") or "").strip().lower()
+    queries = [q for q in (config.get("queries") or []) if q]
+    if not platform or not queries:
+        raise NotCollectable(
+            f"{source.name} needs a platform (tiktok, instagram or reddit) and at "
+            f"least one search term."
+        )
+    since = timezone.now() - timedelta(days=int(config.get("window_days") or WINDOW_DAYS))
+
+    if platform == "reddit":
+        rows = apify_for(source, config=REDDIT).search_posts(
+            queries, since=since.date().isoformat(), max_items=limit
+        )
+    elif platform in ("tiktok", "instagram"):
+        pages = int(config.get("pages") or SOCIAL_PAGES)
+        connector = virlo_for(source, max_calls=len(queries) * pages)
+        rows = []
+        try:
+            for query in queries:
+                rows.extend(connector.search(platform, query, pages=pages))
+        finally:
+            # Read by `poll_source` onto the run, so what was spent is recorded
+            # even when the run fails part-way or keeps nothing new.
+            source.collection_cost_usd = connector.cost_usd
+    else:
+        raise NotCollectable(f"{source.name}: unknown platform {platform!r}.")
+
+    kept, seen = [], set()
+    for row in rows:
+        published = row.get("published_at")
+        if published is None or published < since or row["external_id"] in seen:
+            continue
+        seen.add(row["external_id"])
+        row["platform"] = platform
+        kept.append(row)
+    logger.info("%s: %s of %s results inside the %s-day window",
+                source.name, len(kept), len(rows), config.get("window_days") or WINDOW_DAYS)
+    return kept
+
+
 def _unbuilt(route: str) -> Callable[[Source, int], list[dict]]:
     def collect(source: Source, limit: int) -> list[dict]:
         raise NotCollectable(
@@ -110,7 +172,7 @@ COLLECTORS: dict[str, Callable[[Source, int], list[dict]]] = {
     Source.Route.PODCAST: _podcast,
     Source.Route.YOUTUBE: _youtube,
     Source.Route.RESEARCH: _unbuilt("research"),
-    Source.Route.SOCIAL: _unbuilt("social"),
+    Source.Route.SOCIAL: _social,
 }
 
 #: How many items to take from one poll. Small on purpose: a source is polled

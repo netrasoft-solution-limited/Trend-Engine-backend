@@ -99,7 +99,10 @@ def poll_source(self, source_id: int, limit: int | None = None) -> dict:
         source.mark_polled(succeeded=False)
         raise self.retry(exc=exc) from exc
 
-    result = ingest_rows(source=source, policy=source.policy, rows=rows, run=run)
+    result = ingest_rows(source=source, policy=source.policy, rows=rows, run=run,
+                         transcript_method=_text_method(source),
+                         # A post's own words, exactly: no caption mishearing.
+                         transcript_quality=90 if source.route == Source.Route.SOCIAL else 60)
 
     # Only NEW items are screened. Re-gating something already judged would
     # spend on a question that has an answer (Arch §6.2), and the idempotency
@@ -146,8 +149,10 @@ def _finish(
     run.finished_at = timezone.now()
     run.error = error[:2000]
     run.items_collected, run.items_created, run.items_seen_before = counts
+    run.cost_usd = getattr(run.source, "collection_cost_usd", None) or run.cost_usd
     run.save(
         update_fields=[
+            "cost_usd",
             "status",
             "blocking",
             "finished_at",
@@ -157,3 +162,13 @@ def _finish(
             "items_seen_before",
         ]
     )
+
+
+def _text_method(source: Source) -> str:
+    """How a row that arrives with its text got it: captions on YouTube, the
+    post itself on Reddit."""
+    from apps.evidence.models import TranscriptArtifact
+
+    if source.route == Source.Route.SOCIAL:
+        return TranscriptArtifact.Method.POST_TEXT
+    return TranscriptArtifact.Method.APIFY_SUBTITLES

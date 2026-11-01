@@ -235,6 +235,83 @@ def _assemblyai(item: ContentItem) -> Transcript:
     )
 
 
+def _virlo(item: ContentItem):
+    from apps.connectors.factory import ConnectorUnavailable, virlo_for
+
+    try:
+        return virlo_for(item.source, max_calls=2)
+    except ConnectorUnavailable as exc:
+        raise Failed(str(exc)) from exc  # see the note in `_taddy`
+
+
+def _video_id(item: ContentItem) -> tuple[str, str]:
+    platform, _, video = item.external_id.partition(":")
+    if not video:
+        raise Unavailable("not a Virlo item")
+    return platform, video
+
+
+def _virlo_transcript(item: ContentItem) -> Transcript:
+    """TikTok speech, $0.01. Instagram has none to give."""
+    from apps.connectors.providers.virlo import PRICE_PER_CALL_USD, VirloError, VirloUnsupported
+
+    platform, video = _video_id(item)
+    if platform != "tiktok":
+        raise Unavailable(f"Virlo has no transcript route for {platform}")
+    connector = _virlo(item)
+    try:
+        text, anchors = connector.transcript(platform, video)
+    except VirloUnsupported as exc:
+        raise Unavailable(str(exc)) from exc
+    except VirloError as exc:
+        raise (Unavailable if exc.blocking else Failed)(str(exc)) from exc
+    if not text.strip():
+        raise Unavailable("no speech or captions in this video")
+    return Transcript(
+        text=text, anchors=anchors, method=TranscriptArtifact.Method.VIRLO,
+        quality=60, cost_usd=PRICE_PER_CALL_USD,
+    )
+
+
+#: Enough replies to show what viewers ask or object to; one page is $0.01.
+COMMENT_LIMIT = 20
+
+
+def _caption_comments(item: ContentItem) -> Transcript:
+    """What the creator wrote and what viewers replied, never what was said.
+
+    Mark, 31 Oct: Instagram has no transcript; use captions and comments and
+    label the gap; never present unseen spoken claims as evidence. The text is
+    headed so extraction, and anyone reading a quote, knows what it is.
+    """
+    from apps.connectors.providers.virlo import PRICE_PER_CALL_USD, VirloError
+
+    platform, video = _video_id(item)
+    caption = (item.description or "").strip()
+    replies: list[str] = []
+    cost = Decimal("0")
+    try:
+        connector = _virlo(item)
+        for comment in connector.comments(platform, video)[:COMMENT_LIMIT]:
+            text = (comment.get("text") or "").strip()
+            if text:
+                replies.append(f"- {text}")
+        cost = PRICE_PER_CALL_USD * connector.calls
+    except (Failed, VirloError) as exc:
+        logger.info("No comments for item %s: %s", item.pk, exc)
+    if not caption and not replies:
+        raise Unavailable("no caption and no comments")
+    text = (
+        "[Caption and viewer comments only. The video's speech was not transcribed.]\n\n"
+        f"Caption by {item.creator or 'the creator'}:\n{caption or '(none)'}"
+        + ("\n\nViewer comments:\n" + "\n".join(replies) if replies else "")
+    )
+    return Transcript(
+        text=text, anchors=[], method=TranscriptArtifact.Method.CAPTION_COMMENTS,
+        quality=40, cost_usd=cost,
+    )
+
+
 def _duration_seconds(item: ContentItem) -> float | None:
     """Episode length, for pricing an ASR call before making it.
 
@@ -272,6 +349,8 @@ RUNGS: dict[str, Callable[[ContentItem], Transcript]] = {
     "taddy": _taddy,
     "apify_subtitles": _apify_subtitles,
     "assemblyai": _assemblyai,
+    "virlo_transcript": _virlo_transcript,
+    "caption_comments": _caption_comments,
     # Named in the chains, not built. Listed explicitly so the log says "not
     # built yet" rather than "unknown rung", which reads like a typo.
     "publisher_transcript": _not_implemented("publisher_transcript"),

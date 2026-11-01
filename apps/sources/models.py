@@ -56,6 +56,9 @@ class Source(models.Model):
     #:     {"series_name": "The Drive"}    podcast, fallback — Taddy matches exactly
     #:     {"queries": ["magnesium"]}      youtube — Apify search
     #:     {"urls": ["https://…"]}         youtube — specific videos
+    #:     {"platform": "tiktok", "queries": ["magnesium sleep"]}
+    #:                                     social — tiktok / instagram via
+    #:                                     Virlo, reddit via Apify
     config = models.JSONField(default=dict, blank=True)
 
     #: How often this source is worth asking. Podcasts publish weekly; a search
@@ -139,6 +142,7 @@ class AcquisitionProvider(models.Model):
         TADDY = "taddy", "Taddy"
         APIFY = "apify", "Apify"
         ASSEMBLYAI = "assemblyai", "AssemblyAI"
+        VIRLO = "virlo", "Virlo"
         NCBI = "ncbi", "NCBI E-utilities"
         CROSSREF = "crossref", "Crossref"
         RSS = "rss", "Direct RSS"

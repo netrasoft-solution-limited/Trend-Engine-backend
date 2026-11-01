@@ -534,15 +534,16 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
         "text": (
             f"{window_sentence(sources)}\n\n"
             + (
-                f"Collected automatically: {len(items)} podcast and video item(s) from "
-                f"{len(creators)} creator(s), transcribed and quoted with the moment each "
-                f"line was said. Paid sponsor segments are identified and excluded, and the "
-                f"same conversation published twice (a podcast and its video, or a clip) "
-                f"counts once.\n\n"
+                f"Collected automatically: {len(items)} item(s) ({_by_platform(items)}) from "
+                f"{len(creators)} creator(s). Podcasts and videos are transcribed and quoted "
+                f"with the moment each line was said; Reddit posts are quoted as written. "
+                f"Paid sponsor segments and posts marked as promotional are identified and "
+                f"excluded, and the same conversation or post found twice counts once.\n\n"
                 if items else
                 "No automatically collected item is cited in this brief: its stories were "
                 "started by an analyst from the examples below.\n\n"
             )
+            + f"{coverage_gaps(items)}\n\n"
             + f"Entered by hand, with their links, dates and labels: {observed_line}. "
             f"These are targeted examples, not a representative sample. Figures keep "
             f"their kind: a search estimate is a rolling monthly average, Shop counts are "
@@ -551,6 +552,39 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
             f"and measurement are separate steps; see Review status above."
         ),
     }
+
+
+#: The channels a brief should be able to draw on, in the order they are named.
+CHANNELS = ("podcast", "youtube", "tiktok", "instagram", "reddit")
+
+
+def _by_platform(items) -> str:
+    counts: OrderedDict[str, int] = OrderedDict((c, 0) for c in CHANNELS)
+    for item in items:
+        counts[item.platform] = counts.get(item.platform, 0) + 1
+    labels = {"podcast": "podcast", "youtube": "YouTube", "tiktok": "TikTok",
+              "instagram": "Instagram", "reddit": "Reddit"}
+    return ", ".join(f"{n} {labels.get(p, p)}" for p, n in counts.items() if n)
+
+
+def coverage_gaps(items) -> str:
+    """What this brief cannot see, stated rather than left to be inferred."""
+    present = {item.platform for item in items}
+    labels = {"podcast": "podcasts", "youtube": "YouTube", "tiktok": "TikTok",
+              "instagram": "Instagram", "reddit": "Reddit"}
+    missing = [labels[c] for c in CHANNELS if c not in present]
+    lines = []
+    if missing:
+        lines.append(f"Coverage gaps: no collected item from {', '.join(missing)} is cited here.")
+    if "instagram" in present:
+        lines.append("Instagram Reels are read from captions and comments only; their speech "
+                     "is not transcribed.")
+    if "reddit" in present:
+        lines.append("Reddit's public feed carries no score or comment count, so none is shown.")
+    lines.append("Monthly search volumes are unavailable (no keyword-tool data); search "
+                 "interest, where shown, is Google Trends relative interest. TikTok Shop sales "
+                 "are not collected.")
+    return " ".join(lines)
 
 
 def _approvals(organization, developments, profiles) -> str:
@@ -698,7 +732,13 @@ def _source_line(item: ContentItem) -> str:
     when = item.published_at or item.discovered_at
     title = _label(item.title)
     named = f"[{title}]({item.clean_url})" if item.url else title
-    return f"{named} — {who}" + (f", {when:%-d %b %Y}" if when else "")
+    line = f"{named} — {who}" + (f", {when:%-d %b %Y}" if when else "")
+    if item.platform in ("tiktok", "instagram", "reddit"):
+        line += f" — {item.platform_label}"
+    if getattr(getattr(item, "transcript", None), "method", "") == "caption_comments":
+        # Mark, 31 Oct: never present unseen spoken claims as evidence.
+        line += " (caption and comments only; speech not transcribed)"
+    return line
 
 
 def _strength(signal: Signal) -> str:

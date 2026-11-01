@@ -12,12 +12,13 @@ The nav bar at the top of every page has: Triage · Clients · Outputs · Source
 
 ## 1. Keep the catalogue current (when Jarrow's range changes)
 
-0. After a catalogue change, a developer runs `manage.py describe_catalogue jarrow --activate` once: each listing gets Jarrow's own product description, so drafts describe products exactly as Jarrow does.
-1. **Clients → Jarrow Formulas → Import a product list or profile** (**MANUAL**). Upload the full-portfolio CSV. Any sheet with `product` and `primary_listening_family` columns is recognised as a catalogue inventory.
+0. To set up the weekly social searches, a developer runs `manage.py social_sources topics.json` (one `{topic, query}` per family and candidate). TikTok and Instagram stay paused until the Virlo key is entered under **Vendor keys**; run it again afterwards to schedule them.
+1. After a catalogue change, a developer runs `manage.py describe_catalogue jarrow --activate` once: each listing gets Jarrow's own product description, so drafts describe products exactly as Jarrow does.
+2. **Clients → Jarrow Formulas → Import a product list or profile** (**MANUAL**). Upload the full-portfolio CSV. Any sheet with `product` and `primary_listening_family` columns is recognised as a catalogue inventory.
    - Each listing is assigned to its family.
    - The live profile's audiences, priorities, competitors and any words you added to a listing by hand are kept.
-2. A **draft** version opens. Check the counts and the families, then **Make live** (**MANUAL**). Nothing changes for briefs until you do.
-3. To change how a product is matched, open the live version, add words to its terms, and save as a new version.
+3. A **draft** version opens. Check the counts and the families, then **Make live** (**MANUAL**). Nothing changes for briefs until you do.
+4. To change how a product is matched, open the live version, add words to its terms, and save as a new version.
 
 ## 2. Collect evidence (rolling 30-day window)
 
@@ -25,12 +26,17 @@ The nav bar at the top of every page has: Triage · Clients · Outputs · Source
 - Podcasts are collected weekly.
 - YouTube searches run weekly, limited to videos uploaded in the last 30 days. **Collect now** on a source runs one at once.
 - Each new item passes a cheap relevance check. Relevant items are transcribed and their claims extracted with timestamps.
+- **TikTok and Instagram Reels** (through Virlo) and **Reddit** (through Apify) run weekly: one standing search per product family and per candidate, on each platform.
+  - Only posts from the last 30 days are kept. The same post found by two searches is held once, and every collection keeps its own dated reading of views, likes, comments, shares and saves.
+  - TikTok speech is transcribed. Instagram has no transcript, so Reels are read from the caption and viewer comments, and every brief says so. Reddit posts are quoted as written; Reddit shows no scores or comment counts publicly.
+  - Posts marked as promotional (#ad, #affiliate, "Amazon Associate" and similar) are labelled and never count as independent evidence.
+  - TikTok Shop sales and monthly search volumes are not collected; briefs state both gaps.
 - Sponsored segments are marked and left out.
 - The same conversation published twice (a podcast and its video, or a clip) counts once.
 
 **By hand (MANUAL):**
-- **Sources → Add**: a podcast series or a YouTube search. **Collect now** on a source runs it immediately.
-- **Observations**: Reddit, Instagram, TikTok Shop, search estimates and Google Trends readings. Use **Download the template**, fill one row per observation, then **Import**. You can also use **Add one by hand**.
+- **Sources → Add**: a podcast series, a YouTube search, or a social search (platform `tiktok`, `instagram` or `reddit`). **Collect now** on a source runs it immediately.
+- **Observations**: anything not collected automatically, such as TikTok Shop listings and Google Trends readings, or Reddit, TikTok and Instagram while their keys are missing. Use **Download the template**, fill one row per observation, then **Import**. You can also use **Add one by hand**.
   - Every row needs its link and dates.
   - Search figures need their query, provider, geography and period.
   - Use the label columns for advertisements, brand content, older material and coverage gaps.

@@ -322,7 +322,7 @@ def _render(claims: list[Claim], open_signals) -> str:
         tags = [claim.kind] + (["cites a study"] if claim.is_cited else [])
         lines.append(
             f"C{claim.pk} | I{item.pk} | {item.creator or 'unattributed'} | "
-            f"{item.source.get_route_display()} | {claim.said_at:%Y-%m-%d} | "
+            f"{item.platform_label} | {claim.said_at:%Y-%m-%d} | "
             f"{', '.join(tags)} | about: {claim.subject or '-'} | {claim.text}"
         )
     existing = "\n".join(
@@ -403,7 +403,8 @@ def rescore(
                 # The show or channel stands in for an unrecorded creator: two
                 # episodes of one show are one voice, not two confirmations.
                 creator=(item.creator or item.source.name).strip().lower(),
-                route=item.source.route,
+                # TikTok and Reddit agreeing are two channels, not one "social".
+                route=item.platform,
                 at=item.published_at or item.discovered_at,
                 is_cited=row.claim.is_cited,
             )

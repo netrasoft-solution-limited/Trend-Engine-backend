@@ -293,7 +293,12 @@ def _reading() -> dict:
             "· Social engagement is cumulative from posting to the date observed.\n"
             "· Advertisements and brand content show response to marketing, not independent "
             "demand, and are labelled wherever they appear.\n"
-            "· Observations are targeted examples entered by an analyst, not a representative "
-            "sample."
+            "· Monthly search volumes are unavailable: there is no keyword-tool data. Search "
+            "interest is Google Trends relative interest; any estimate carried from an "
+            "earlier report is labelled with its date and source.\n"
+            "· Instagram Reels are read from captions and comments only, never their speech. "
+            "Reddit's public feed carries no score or comment count.\n"
+            "· Observations are targeted examples, entered by an analyst or collected "
+            "automatically from standing searches. They are not a representative sample."
         ),
     }

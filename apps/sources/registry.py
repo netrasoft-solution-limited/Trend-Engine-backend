@@ -50,6 +50,8 @@ class RouteSpec:
     #: provider's policy is a mis-recorded legal basis, which is precisely what
     #: PRD §7.2 exists to prevent, and it would survive every other check here.
     provider_kind: str = ""
+    #: A route served by more than one vendor (social: Virlo and Apify).
+    provider_kinds: tuple[str, ...] = ()
 
 
 SPECS: dict[str, RouteSpec] = {
@@ -131,14 +133,28 @@ SPECS: dict[str, RouteSpec] = {
     Source.Route.SOCIAL: RouteSpec(
         route=Source.Route.SOCIAL,
         label="Social",
-        blurb="TikTok, Instagram, X, Reddit.",
-        available=False,
-        unavailable_because=(
-            "Social platforms are gated rather than unbuilt. PRD §4.2 requires "
-            "each one to have its own recorded access basis, cost line and "
-            "approval before any connector work begins, and none is subscribed. "
-            "This is a commercial decision before it is a build."
+        blurb=(
+            "A standing search on one platform: TikTok or Instagram Reels through "
+            "Virlo ($0.01 a page), or Reddit through Apify. Only posts from the "
+            "last 30 days are kept; the same post found twice is held once."
         ),
+        fields=(
+            Field(
+                key="platform",
+                label="Platform",
+                placeholder="tiktok",
+                help="tiktok, instagram or reddit. Use the matching access basis below.",
+            ),
+            Field(
+                key="queries",
+                label="Search terms",
+                placeholder="magnesium glycinate, magnesium sleep",
+                is_list=True,
+                help="Each term costs two pages a run on TikTok and Instagram ($0.02).",
+            ),
+        ),
+        requires_one_of=("queries",),
+        provider_kinds=(AcquisitionProvider.Kind.VIRLO, AcquisitionProvider.Kind.APIFY),
     ),
 }
 
@@ -164,6 +180,11 @@ def config_problem(route: str, config: dict) -> str:
         return spec.unavailable_because
     if not spec.requires_one_of:
         return ""
+
+    if route == Source.Route.SOCIAL and (config or {}).get("platform", "").strip().lower() not in (
+        "tiktok", "instagram", "reddit"
+    ):
+        return "Name the platform: tiktok, instagram or reddit."
 
     filled = [key for key in spec.requires_one_of if (config or {}).get(key)]
     if filled:
@@ -201,6 +222,7 @@ def policies_for(route: str, policies) -> list:
     the wrong vendor's basis looks correct in every view afterwards.
     """
     spec = spec_for(route)
-    if spec is None or not spec.provider_kind:
+    kinds = (spec.provider_kinds or (spec.provider_kind,)) if spec else ()
+    if not any(kinds):
         return []
-    return [p for p in policies if p.provider.kind == spec.provider_kind]
+    return [p for p in policies if p.provider.kind in kinds]

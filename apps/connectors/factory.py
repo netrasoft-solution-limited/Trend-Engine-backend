@@ -18,6 +18,7 @@ from apps.sources.models import AcquisitionProvider, ProviderPolicyVersion, Sour
 from .providers.apify import YOUTUBE, ActorConfig, ApifyActorConnector
 from .providers.assemblyai import DEFAULT_MODEL, AssemblyAIConnector
 from .providers.taddy import TaddyConnector
+from .providers.virlo import VirloConnector
 
 
 class ConnectorUnavailable(RuntimeError):
@@ -27,6 +28,9 @@ class ConnectorUnavailable(RuntimeError):
     the attempt. The message names the fix, because the operator reading it in
     a run log is the person who has to apply it.
     """
+
+    #: A missing key or policy is not fixed by retrying in three minutes.
+    blocking = True
 
 
 def _live_policy(provider: AcquisitionProvider) -> ProviderPolicyVersion:
@@ -104,4 +108,16 @@ def assemblyai_for(source: Source, *, model: str = DEFAULT_MODEL) -> AssemblyAIC
         policy=source.policy or _live_policy(provider),
         api_key=_credential(provider),
         model=model,
+    )
+
+
+def virlo_for(source: Source, *, max_calls: int = 0) -> VirloConnector:
+    """TikTok and Instagram Reels (Mark, 31 Oct). `max_calls` is the run's
+    ceiling at $0.01 a call; the connector refuses the call that would pass it."""
+    provider = _provider(AcquisitionProvider.Kind.VIRLO)
+    return VirloConnector(
+        source=source,
+        policy=source.policy or _live_policy(provider),
+        api_key=_credential(provider),
+        max_calls=max_calls,
     )

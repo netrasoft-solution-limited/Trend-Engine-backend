@@ -40,6 +40,9 @@ class IngestionRun(models.Model):
     #: Why a failed run failed, in the vendor's or the config's own words.
     #: A failure the screen cannot explain sends the operator to the logs.
     error = models.TextField(blank=True)
+    #: What the collection itself cost, where the vendor charges per call
+    #: (Virlo). Transcripts carry their own cost on the transcript.
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=0)
 
     class Meta:
         ordering = ("-started_at",)

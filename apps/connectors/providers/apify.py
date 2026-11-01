@@ -62,6 +62,12 @@ class ActorConfig:
     #: Which Actor output field maps to which part of the evidence contract.
     #: A field map, not a parser — changing Actor means changing this dict.
     field_map: dict[str, str] = field(default_factory=dict)
+    #: For a text platform (Reddit): the fields whose text IS the content, so
+    #: the row arrives transcribed and no caption track is looked for.
+    text_fields: tuple[str, ...] = ()
+    #: Prefixed onto the external id, so ids from two platforms cannot collide.
+    id_prefix: str = ""
+    route: str = "apify_subtitles"
 
 
 #: `streamers/youtube-scraper` — 27M runs, the dominant YouTube Actor.
@@ -93,6 +99,31 @@ YOUTUBE = ActorConfig(
         "published_at": "date",
         "description": "text",
     },
+)
+
+
+#: `shahab_adl/reddit-scraper-no-login` — Pure Play's reference collector
+#: (Mark, 31 Oct): $1.50 per 1,000 items plus a negligible run fee. Checked
+#: against a live 10-post run on 1 Nov 2026: posts arrive with id, subreddit,
+#: author, title, text, url and createdAt. Reddit's public feeds carry no
+#: score or comment count, so none is claimed.
+REDDIT = ActorConfig(
+    actor="shahab_adl~reddit-scraper-no-login",
+    build="latest",
+    price_per_result_usd=Decimal("0.0015"),
+    input_template={"onlyPosts": True, "sort": "new", "timeRange": "month",
+                    "maxConcurrency": 2},
+    field_map={
+        "external_id": "id",
+        "title": "title",
+        "url": "url",
+        "creator": "subreddit",
+        "published_at": "createdAt",
+        "description": "text",
+    },
+    text_fields=("title", "text"),
+    id_prefix="reddit:",
+    route="reddit_post",
 )
 
 
@@ -172,6 +203,18 @@ class ApifyActorConnector(BaseConnector):
         rows = self._run(payload, timeout=timeout)
         return [self._normalise(row) for row in rows]
 
+    def search_posts(
+        self, queries: list[str], *, since: str, max_items: int = 20, timeout: float = 280.0
+    ) -> list[dict]:
+        """A text platform's keyword search (Reddit), newest first, from `since`."""
+        payload = {
+            **self.config.input_template,
+            "searchQueries": queries,
+            "maxItemsPerSource": max_items,
+            "since": since,
+        }
+        return [self._normalise(row) for row in self._run(payload, timeout=timeout)]
+
     def fetch_by_url(self, urls: list[str], *, timeout: float = 280.0) -> list[dict]:
         payload = {
             **self.config.input_template,
@@ -213,12 +256,16 @@ class ApifyActorConnector(BaseConnector):
     # ── Internals ───────────────────────────────────────────────────────────
 
     def _run(self, payload: dict, *, timeout: float) -> list[dict]:
+        # The token goes in a header. In the query string it was written to
+        # the worker log by httpx on every run (found 1 Nov).
         url = (
             f"{API}/acts/{self.config.actor}/run-sync-get-dataset-items"
-            f"?token={self._token}&build={self.config.build}"
+            f"?build={self.config.build}"
         )
         with httpx.Client(timeout=timeout, transport=self._transport) as http:
-            response = http.post(url, json=payload)
+            response = http.post(
+                url, json=payload, headers={"Authorization": f"Bearer {self._token}"}
+            )
 
         if response.status_code >= 400:
             # Arch §6.3: auth and policy errors block the connector rather than
@@ -243,6 +290,9 @@ class ApifyActorConnector(BaseConnector):
         Actor field names appear.
         """
         mapped = {target: row.get(source) for target, source in self.config.field_map.items()}
+        if self.config.id_prefix and mapped.get("external_id"):
+            mapped["external_id"] = f"{self.config.id_prefix}{mapped['external_id']}"
+        mapped["route"] = self.config.route
 
         published = mapped.get("published_at")
         if isinstance(published, str):
@@ -251,7 +301,13 @@ class ApifyActorConnector(BaseConnector):
             except ValueError:
                 mapped["published_at"] = None
 
-        transcript, anchors = self._transcript(row)
+        if self.config.text_fields:
+            transcript = "\n\n".join(
+                str(row.get(f)).strip() for f in self.config.text_fields if row.get(f)
+            ) or None
+            anchors = []
+        else:
+            transcript, anchors = self._transcript(row)
         mapped["transcript"] = transcript
         mapped["transcript_anchors"] = anchors
 

@@ -37,7 +37,7 @@ from apps.enrichment.llm.client import (
 )
 from apps.enrichment.llm.costs import CostCapExceeded
 from apps.enrichment.models import Claim, ModelRun
-from apps.evidence.models import Observation
+from apps.evidence.models import Observation, media_key, promotion_reason
 from apps.operations.models import AuditEvent
 
 from .models import Candidate
@@ -167,7 +167,19 @@ def set_adjacent(candidate: Candidate, text: str, *, actor_label: str) -> list[s
 
 
 def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[list, list]:
-    found = list(Observation.objects.filter(pk__in=ids))
+    """Attach observations; one already attached for the same video is skipped.
+
+    O62 and O65 were one Urolithin A video, attached by hand and then again by
+    collection, and counted as two (Mark, 31 Oct). Skipped ids are returned
+    with the missing ones, so the screen says they were not attached.
+    """
+    held = {o.media_key for o in candidate.observations.all() if o.media_key}
+    found = []
+    for o in Observation.objects.filter(pk__in=ids).order_by("pk"):
+        if o.media_key and o.media_key in held:
+            continue
+        held.add(o.media_key)
+        found.append(o)
     candidate.observations.add(*found)
     attached = [o.pk for o in found]
     if attached and _unapprove(candidate):
@@ -182,6 +194,13 @@ def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[l
 #: How far back collected episodes are searched — the briefs' research window.
 COLLECT_DAYS = 30
 COLLECTED_BY = "collected automatically"
+COLLECTED_TYPES = {
+    "youtube": Observation.SourceType.YOUTUBE,
+    "podcast": Observation.SourceType.PODCAST,
+    "tiktok": Observation.SourceType.TIKTOK,
+    "instagram": Observation.SourceType.INSTAGRAM,
+    "reddit": Observation.SourceType.REDDIT,
+}
 
 
 def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
@@ -221,22 +240,29 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
         marker = f"Collected automatically: item {item.pk}"
         existing = Observation.objects.filter(provenance__startswith=marker).first()
         if existing is None:
+            key = media_key(item.clean_url)
+            attached = [o for o in candidate.observations.all() if key and o.media_key == key]
+            if attached:
+                # Already held for this video, entered another way: not twice.
+                continue
             published = item.published_at.date() if item.published_at else None
+            promoted = promotion_reason(item.title, item.description)
             existing = Observation.objects.create(
                 url=item.clean_url,
                 title=item.title[:500],
-                source_type=(
-                    Observation.SourceType.YOUTUBE if "youtube" in (item.url or "")
-                    else Observation.SourceType.PODCAST
-                ),
+                source_type=COLLECTED_TYPES.get(item.platform, Observation.SourceType.OTHER),
                 published_at=published,
                 observed_at=today,
                 topic=candidate.name,
                 excerpt=f"{item.creator or item.source.name}: “{claim.quote.strip()[:280]}”",
                 is_old_material=bool(published and published < window_start),
+                # Affiliate and paid posts are evidence of marketing, not of
+                # independent interest, and the brief counts them apart.
+                is_ad=bool(promoted),
                 limitations=(
-                    "Collected automatically; a speaker's statement quoted from the "
-                    "transcript, not checked against any study it mentions."
+                    "Collected automatically; " + _said(item)
+                    + ", not checked against any study it mentions."
+                    + (f" The creator {promoted}." if promoted else "")
                 ),
                 event_key=f"item-{item.duplicate_of_id or item.pk}",
                 entered_by=COLLECTED_BY,
@@ -247,6 +273,15 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
     if new:
         attach(candidate, new, actor_label=actor_label)
     return new
+
+
+def _said(item) -> str:
+    method = getattr(getattr(item, "transcript", None), "method", "")
+    if method == "caption_comments":
+        return "quoted from the caption or a viewer comment (speech not transcribed)"
+    if method == "post_text":
+        return "quoted from the post"
+    return "a speaker's statement quoted from the transcript"
 
 
 def detach(candidate: Candidate, observation_id: int, *, actor_label: str) -> None:

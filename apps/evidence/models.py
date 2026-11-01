@@ -18,7 +18,8 @@ minimum the relevance gate and extraction need. MetricSnapshot and Tombstone
 from __future__ import annotations
 
 import hashlib
-from urllib.parse import urlsplit, urlunsplit
+import re
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from django.db import models
 
@@ -26,6 +27,58 @@ from django.db import models
 #: poll; the recent history answers "why no transcript yet" without growing
 #: without bound.
 MAX_TRANSCRIPT_ATTEMPTS = 10
+
+#: What a creator writes when a post is paid for or earns commission. O64 was
+#: titled "#affiliate" and still counted as independent discussion (Mark, 31 Oct).
+PROMOTION_MARKS = re.compile(
+    r"#(?:ad|ads|affiliate|sponsored|partner|paidpartnership|gifted)\b"
+    r"|affiliate link|amazon associate|earn(?:s)? (?:a )?(?:small )?commission"
+    r"|from qualifying purchases|sponsored by|paid partnership|use (?:my )?code\b",
+    re.IGNORECASE,
+)
+
+
+def promotion_reason(*texts: str) -> str:
+    """The words that mark this as promotional, or "" if none do."""
+    for text in texts:
+        found = PROMOTION_MARKS.search(text or "")
+        if found:
+            return f"marked as promotional (“{found.group(0).strip()}”)"
+    return ""
+
+
+def media_key(url: str) -> str:
+    """One key per video or post, whatever query string it was linked with.
+
+    O62 and O65 were the same Urolithin A video, attached twice through two
+    routes (Mark, 31 Oct). Comparing this, not the URL, catches that.
+    """
+    if not url:
+        return ""
+    parts = urlsplit(url.strip())
+    host = parts.netloc.lower().removeprefix("www.").removeprefix("m.")
+    if host == "youtu.be":
+        return f"youtube:{parts.path.strip('/')}"
+    if host.endswith("youtube.com"):
+        video = parse_qs(parts.query).get("v", [""])[0]
+        if video:
+            return f"youtube:{video}"
+        shorts = re.match(r"/(?:shorts|live)/([^/?]+)", parts.path)
+        if shorts:
+            return f"youtube:{shorts.group(1)}"
+    if host.endswith("tiktok.com"):
+        found = re.search(r"/video/(\d+)", parts.path)
+        if found:
+            return f"tiktok:{found.group(1)}"
+    if host.endswith("instagram.com"):
+        found = re.match(r"/(?:reel|reels|p)/([^/?]+)", parts.path)
+        if found:
+            return f"instagram:{found.group(1)}"
+    if host.endswith("reddit.com"):
+        found = re.search(r"/comments/([a-z0-9]+)", parts.path)
+        if found:
+            return f"reddit:{found.group(1)}"
+    return f"{host}{parts.path.rstrip('/')}".lower()
 
 
 class ContentItem(models.Model):
@@ -154,6 +207,22 @@ class ContentItem(models.Model):
         return self.title[:80]
 
     @property
+    def platform(self) -> str:
+        """youtube, podcast, tiktok, instagram, reddit — the channel it came from.
+
+        A social source's route is "social" whatever the platform, and TikTok
+        and Reddit agreeing are two channels, not one.
+        """
+        route = getattr(self.source, "route", "") or ""
+        if route == "social":
+            return ((self.source.config or {}).get("platform") or route).strip().lower()
+        return route
+
+    @property
+    def platform_label(self) -> str:
+        return PLATFORM_LABELS.get(self.platform, self.platform.title())
+
+    @property
     def is_metadata_only(self) -> bool:
         """Arch §7.1: metadata-only items must be surfaced honestly as such,
         never presented as fully understood content. Extraction skips them."""
@@ -217,6 +286,42 @@ class ContentItem(models.Model):
         return digest.hexdigest()
 
 
+PLATFORM_LABELS = {
+    "podcast": "Podcast", "youtube": "YouTube", "tiktok": "TikTok",
+    "instagram": "Instagram", "reddit": "Reddit", "research": "Research",
+}
+
+
+class MetricSnapshot(models.Model):
+    """One reading of a post's public counts, as collected.
+
+    Kept per reading rather than overwritten (Mark, 31 Oct: "save repeated
+    snapshots"), so change between two dated readings is visible and a
+    lifetime total is never read as recent growth. Null means the platform did
+    not report it; Reddit's public feeds report none.
+    """
+
+    content_item = models.ForeignKey(
+        "evidence.ContentItem", on_delete=models.CASCADE, related_name="snapshots"
+    )
+    run = models.ForeignKey(
+        "ingestion.IngestionRun", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="snapshots",
+    )
+    observed_at = models.DateTimeField(auto_now_add=True)
+    views = models.BigIntegerField(null=True, blank=True)
+    likes = models.BigIntegerField(null=True, blank=True)
+    comments = models.BigIntegerField(null=True, blank=True)
+    shares = models.BigIntegerField(null=True, blank=True)
+    saves = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("content_item", "observed_at")
+
+    def __str__(self) -> str:
+        return f"{self.content_item_id} @ {self.observed_at:%Y-%m-%d}"
+
+
 class TranscriptArtifact(models.Model):
     """The full text of one item, and how it was obtained.
 
@@ -232,6 +337,12 @@ class TranscriptArtifact(models.Model):
         APIFY_SUBTITLES = "apify_subtitles", "Apify subtitles"
         ASSEMBLYAI = "assemblyai", "AssemblyAI"
         MANUAL = "manual", "Manual import"
+        #: A text post (Reddit): the post is the content, nothing is transcribed.
+        POST_TEXT = "post_text", "Post text"
+        VIRLO = "virlo_transcript", "Virlo transcript"
+        #: Instagram has no transcript route, and some TikToks have no speech.
+        #: What the creator wrote and what viewers replied: never what was said.
+        CAPTION_COMMENTS = "caption_comments", "Caption and comments only (speech not transcribed)"
 
     content_item = models.OneToOneField(
         "evidence.ContentItem", on_delete=models.CASCADE, related_name="transcript"
@@ -389,6 +500,10 @@ class Observation(models.Model):
     @property
     def independence_key(self) -> str:
         return self.event_key.strip().lower() or f"observation-{self.pk}"
+
+    @property
+    def media_key(self) -> str:
+        return media_key(self.url)
 
     @property
     def labels(self) -> list[str]:

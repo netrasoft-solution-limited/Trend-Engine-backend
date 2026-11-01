@@ -94,13 +94,15 @@ def test_youtube_needs_queries_or_urls():
     assert registry.config_problem(Source.Route.YOUTUBE, channels) == ""
 
 
-def test_the_social_route_explains_that_it_is_gated_not_merely_unbuilt():
-    """PRD §4.2: each platform needs its own access basis, cost line and
-    approval. "Not built yet" would invite someone to build it."""
-    problem = registry.config_problem(Source.Route.SOCIAL, {})
-
-    assert "commercial decision" in problem
-    assert "approval" in problem
+def test_a_social_source_needs_a_known_platform_and_terms():
+    """Mark, 31 Oct: TikTok and Instagram through Virlo, Reddit through Apify."""
+    assert "platform" in registry.config_problem(Source.Route.SOCIAL, {"queries": ["x"]})
+    assert "platform" in registry.config_problem(
+        Source.Route.SOCIAL, {"platform": "x.com", "queries": ["x"]})
+    assert "Nothing to collect" in registry.config_problem(
+        Source.Route.SOCIAL, {"platform": "tiktok"})
+    assert registry.config_problem(
+        Source.Route.SOCIAL, {"platform": "reddit", "queries": ["urolithin a"]}) == ""
 
 
 def test_the_research_route_says_it_is_a_package_not_a_setting():
@@ -218,13 +220,13 @@ def test_a_gated_route_cannot_be_added_at_all(client, admin, policy):
 
     response = client.post(
         reverse("ops-sources"),
-        {"name": "TikTok pilot", "route": "social", "policy": policy.pk,
+        {"name": "Trials", "route": "research", "policy": policy.pk,
          "interval_hours": "24"},
         follow=True,
     )
 
-    assert "commercial decision" in response.content.decode()
-    assert not Source.objects.filter(name="TikTok pilot").exists()
+    assert "planned package" in response.content.decode()
+    assert not Source.objects.filter(name="Trials").exists()
 
 
 def test_two_sources_cannot_share_a_name(client, admin, policy):

@@ -7,6 +7,7 @@ lookup that code branches on.
 
     podcast:  publisher_transcript → taddy → assemblyai → manual → metadata_only
     youtube:  creator_captions → apify_subtitles → supadata → manual → metadata_only
+    social:   virlo_transcript → caption_comments → metadata_only
 
 Each step records whether it was the one that succeeded, so transcript
 provenance and cost stay attributable per item.
@@ -27,6 +28,14 @@ DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
         "apify_subtitles",
         "supadata",
         "manual",
+        "metadata_only",
+    ),
+    # Reddit posts arrive with their text. TikTok's speech comes from Virlo;
+    # Instagram has no transcript route, so it falls to what the creator wrote
+    # and viewers replied, labelled as exactly that.
+    "social": (
+        "virlo_transcript",
+        "caption_comments",
         "metadata_only",
     ),
     "research": (

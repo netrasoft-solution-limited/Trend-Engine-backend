@@ -288,3 +288,43 @@ def test_collected_episodes_that_name_a_candidate_become_attached_observations(c
     assert o.source_type == "youtube" and "pomegranate" in o.excerpt
     assert o.provenance.startswith("Collected automatically: item")
     assert list(candidate.observations.values_list("pk", flat=True)) == first
+
+
+def test_collection_flags_affiliate_videos_and_never_attaches_a_video_twice(catalogue):
+    """Mark, 31 Oct: O64 was titled #affiliate but unflagged; O62 and O65 were one video."""
+    from apps.enrichment.models import Claim
+    from apps.evidence.models import ContentItem, ContentSegment
+    from apps.sources.models import Source
+
+    source = Source.objects.create(name="Longevity search", route=Source.Route.YOUTUBE)
+
+    def episode(external_id, title, description=""):
+        item = ContentItem.objects.create(
+            source=source, external_id=external_id, title=title, description=description,
+            url=f"https://www.youtube.com/watch?v={external_id}", content_hash=external_id,
+        )
+        quote = "Urolithin A supports mitochondria."
+        segment = ContentSegment.objects.create(
+            content_item=item, ordinal=1, text=quote, start_char=0, end_char=len(quote)
+        )
+        Claim.objects.create(content_item=item, segment=segment, kind="effect",
+                             subject="mitochondria", text=quote, quote=quote)
+
+    episode("aff", "Supplement overview #affiliate",
+            "As an Amazon Associate I earn from qualifying purchases.")
+    episode("dup", "Calm, Not Kill")
+    candidate = create(catalogue, "Urolithin A")
+    by_hand = observation(url="https://www.youtube.com/watch?v=dup&t=12s",
+                          title="Calm, Not Kill", source_type="youtube")
+
+    with scoped(catalogue):
+        opportunities.attach(candidate, [by_hand.pk], actor_label="abu")
+        new = opportunities.collect(candidate, actor_label="abu")
+        again, skipped = opportunities.attach(candidate, new + [by_hand.pk], actor_label="abu")
+
+    assert len(new) == 1
+    affiliate = Observation.objects.get(pk=new[0])
+    assert affiliate.is_ad and "#affiliate" in affiliate.limitations
+    assert again == [] and by_hand.pk in skipped
+    keys = [o.media_key for o in candidate.observations.all()]
+    assert sorted(keys) == ["youtube:aff", "youtube:dup"]

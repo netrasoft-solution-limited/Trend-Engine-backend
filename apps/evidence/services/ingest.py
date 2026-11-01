@@ -28,7 +28,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
-from apps.evidence.models import ContentItem, TranscriptArtifact
+from apps.evidence.models import ContentItem, MetricSnapshot, TranscriptArtifact
 
 logger = logging.getLogger(__name__)
 
@@ -81,17 +81,32 @@ def ingest_rows(
             continue
 
         text = row.get("transcript") or ""
+        social = bool(row.get("platform"))
+        # A social post is one post however its caption is edited, so its id
+        # alone is the key; hashing the caption would collect it again.
         content_hash = ContentItem.hash_content(
-            external_id, row.get("title") or "", text[:4096]
+            external_id, *(() if social else (row.get("title") or "", text[:4096]))
         )
 
         with transaction.atomic():
-            item, created = ContentItem.objects.get_or_create(
-                source=source,
-                external_id=external_id,
-                content_hash=content_hash,
-                defaults=_fields(row, policy=policy, run=run, has_text=bool(text)),
+            held = (
+                # The same video found by two topic streams is one item, not
+                # two that corroborate each other (Mark, 31 Oct).
+                ContentItem.objects.filter(
+                    external_id=external_id, source__route=source.route
+                ).order_by("pk").first()
+                if social else None
             )
+            if held is not None:
+                item, created = held, False
+            else:
+                item, created = ContentItem.objects.get_or_create(
+                    source=source,
+                    external_id=external_id,
+                    content_hash=content_hash,
+                    defaults=_fields(row, policy=policy, run=run, has_text=bool(text)),
+                )
+            _snapshot(item, row, run)
 
             if created and text:
                 TranscriptArtifact.objects.create(
@@ -114,6 +129,17 @@ def ingest_rows(
 
     logger.info("Ingested from %s: %s", source, result)
     return result
+
+
+def _snapshot(item: ContentItem, row: dict, run) -> None:
+    """Each collection's reading of the public counts, kept, never overwritten."""
+    counts = {k: v for k, v in (row.get("engagement") or {}).items()
+              if k in ("views", "likes", "comments", "shares", "saves")}
+    if any(isinstance(v, int) for v in counts.values()):
+        MetricSnapshot.objects.create(
+            content_item=item, run=run,
+            **{k: v if isinstance(v, int) else None for k, v in counts.items()},
+        )
 
 
 def _fields(row: dict, *, policy, run, has_text: bool) -> dict:
