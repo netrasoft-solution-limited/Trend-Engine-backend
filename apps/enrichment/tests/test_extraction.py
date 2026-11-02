@@ -315,3 +315,18 @@ def test_a_partly_failed_item_stores_nothing_so_a_retry_can_run(item, monkeypatc
 
     assert not Claim.objects.exists()
     assert ModelRun.objects.filter(outcome="errored").exists()
+
+
+def test_a_post_marked_affiliate_yields_only_sponsored_claims(item):
+    """Mark, 31 Oct: promotional material must not inflate corroboration."""
+    item.title = "My honest review #affiliate"
+    item.save()
+    extraction.build_segments(item)
+    llm, _ = extraction_returning(claims=[extraction.ExtractedClaim(
+        segment_ordinal=1, kind="dosage", subject="creatine", text="Five grams.",
+        quote="Five grams daily is enough", is_cited=False, is_sponsored=False,
+    )])
+
+    extraction.extract(item, domain_pack=DOMAIN, client=llm)
+
+    assert Claim.objects.get().is_sponsored

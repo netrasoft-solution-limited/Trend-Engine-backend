@@ -136,7 +136,7 @@ def latest_evidence(signal: Signal):
     dates = [
         _item_date(row.claim.content_item)
         for row in SignalEvidence.objects.filter(
-            signal=signal, role=SignalEvidence.Role.SUPPORTS
+            signal=signal, role=SignalEvidence.Role.SUPPORTS, claim__is_sponsored=False
         ).select_related("claim__content_item")
     ] + [
         link.observation.published_at
@@ -754,7 +754,8 @@ def _strength(signal: Signal) -> str:
         )
     cited = (
         SignalEvidence.objects.filter(
-            signal=signal, role=SignalEvidence.Role.SUPPORTS, claim__is_cited=True
+            signal=signal, role=SignalEvidence.Role.SUPPORTS, claim__is_cited=True,
+            claim__is_sponsored=False,
         ).count()
     )
     against = (

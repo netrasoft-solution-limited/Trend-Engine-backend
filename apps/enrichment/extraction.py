@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from django.db import transaction
 from pydantic import BaseModel, Field
 
-from apps.evidence.models import ContentItem, ContentSegment
+from apps.evidence.models import ContentItem, ContentSegment, promotion_reason
 
 from .llm.client import (
     LLMClient,
@@ -296,6 +296,9 @@ def extract(
     kinds = {choice for choice, _ in Claim.Kind.choices}
     claims: list[Claim] = []
     dropped = 0
+    # A post its creator marks as paid or affiliate (#ad, #affiliate, "Amazon
+    # Associate") is promotional throughout, whatever the model judged.
+    promoted = bool(promotion_reason(item.title, item.description))
 
     for candidate in result.claims:
         segment = by_ordinal.get(candidate.segment_ordinal)
@@ -316,7 +319,7 @@ def extract(
                 text=candidate.text,
                 quote=candidate.quote,
                 is_cited=candidate.is_cited,
-                is_sponsored=candidate.is_sponsored,
+                is_sponsored=candidate.is_sponsored or promoted,
             )
         )
 

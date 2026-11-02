@@ -407,7 +407,9 @@ def rescore(
     """
     facts = {SignalEvidence.Role.SUPPORTS: [], SignalEvidence.Role.CONTRADICTS: []}
     for row in (
-        SignalEvidence.objects.filter(signal=signal)
+        # Paid segments and promotional posts are evidence of marketing, not
+        # of independent discussion (Mark, 31 Oct), so they score nothing.
+        SignalEvidence.objects.filter(signal=signal, claim__is_sponsored=False)
         .select_related("claim__content_item__source", "claim__content_item__duplicate_of__source")
     ):
         # Counted as the conversation it belongs to: a re-upload or a clip adds
