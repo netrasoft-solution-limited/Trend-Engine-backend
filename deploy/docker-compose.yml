@@ -11,6 +11,8 @@
 name: trend-engine
 
 x-django: &django
+  sysctls:
+    net.mptcp.enabled: "0"
   build:
     context: ..
     dockerfile: deploy/Dockerfile
@@ -25,6 +27,8 @@ x-django: &django
 services:
   # ── Edge ──────────────────────────────────────────────────────────────────
   caddy:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: trend-engine-caddy:security-20261024
     build:
       context: .
@@ -36,6 +40,7 @@ services:
       SITE_DOMAIN: ${SITE_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL}
       OPS_ALLOWED_IPS: ${OPS_ALLOWED_IPS:-}
+      GODEBUG: multipathtcp=0
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -55,6 +60,8 @@ services:
   # process in production: the portal is static files plus a JSON API, and
   # Caddy already serves files.
   frontend:
+    sysctls:
+      net.mptcp.enabled: "0"
     build:
       # The PARENT of both repos, not the backend root: the portal lives in a
       # separate repository (Trend-Engine) beside this one, so the build needs
@@ -125,6 +132,8 @@ services:
 
   # ── Data ──────────────────────────────────────────────────────────────────
   postgres:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: trend-engine-postgres:security-20261024
     build:
       context: .
@@ -148,6 +157,8 @@ services:
     # blunt about it — an untested backup is not a backup.
 
   redis:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: trend-engine-redis:security-20261024
     build:
       context: .
