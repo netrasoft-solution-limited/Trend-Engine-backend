@@ -152,27 +152,45 @@ def evidence_date():
     return Coalesce("content_item__published_at", "content_item__discovered_at")
 
 
-def window_claims(now: datetime) -> list[Claim]:
+def window_claims(now: datetime, *, batch: int = 0) -> list[Claim]:
+    start = batch * MAX_CLAIMS
     return list(
         Claim.objects.filter(is_sponsored=False)
         .annotate(said_at=evidence_date())
         .filter(said_at__gte=now - timedelta(days=WINDOW_DAYS))
         .select_related("content_item__source", "content_item__duplicate_of__source")
-        .order_by("-said_at", "-pk")[:MAX_CLAIMS]
+        .order_by("-said_at", "-pk")[start:start + MAX_CLAIMS]
     )
 
 
-def detect(*, client: LLMClient | None = None, now: datetime | None = None) -> DetectionResult:
-    """Detect developments in the current window, persist them, and score them."""
+def detect(
+    *, client: LLMClient | None = None, now: datetime | None = None, batches: int = 1
+) -> DetectionResult:
+    """Detect developments in the current window, persist them, and score them.
+
+    The daily run reads the newest `MAX_CLAIMS`. A catch-up after a large
+    collection (the first Reddit, TikTok and Instagram passes added ~1,900
+    claims on 1 Nov) passes `batches` to read further back, one call per batch,
+    each seeing the signals the previous one opened.
+    """
     now = now or timezone.now()
     result = DetectionResult()
+    for batch in range(max(batches, 1)):
+        claims = window_claims(now, batch=batch)
+        if not claims:
+            break
+        _detect_batch(claims, client=client, now=now, result=result)
+        if result.skipped:
+            break
+    result.rescored = rescore_open(now=now)
+    return result
 
-    claims = window_claims(now)
-    result.claims_considered = len(claims)
+
+def _detect_batch(claims, *, client, now, result) -> None:
+    result.claims_considered += len(claims)
     if len({_conversation(c) for c in claims}) < 2:
         result.skipped = "fewer than two items with claims in the window"
-        result.rescored = rescore_open(now=now)
-        return result
+        return
 
     open_signals = {
         s.code: s
@@ -191,7 +209,7 @@ def detect(*, client: LLMClient | None = None, now: datetime | None = None) -> D
     except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
         logger.warning("Signal detection failed: %s", exc)
         result.skipped = str(exc)
-        return result
+        return
 
     # `structured` returns the parsed answer, not its ledger row; detection is
     # a single scheduled call, so the newest detection run IS this one.
@@ -202,14 +220,12 @@ def detect(*, client: LLMClient | None = None, now: datetime | None = None) -> D
         for proposed in detection.signals:
             _apply(proposed, by_id, open_signals, model_run, now, result)
 
-    result.rescored = rescore_open(now=now)
     logger.info(
         "Detection over %d claims: %d new, %d extended, %d invented ID(s) dropped, "
         "%d single-item proposal(s) dropped, %d duplicate proposal(s) kept as extensions",
         result.claims_considered, len(result.created), len(result.extended),
         result.dropped_unknown_ids, result.dropped_single_source, len(result.reused),
     )
-    return result
 
 
 def _apply(proposed, by_id, open_signals, model_run, now, result) -> None:
