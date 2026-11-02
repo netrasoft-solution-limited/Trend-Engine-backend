@@ -101,6 +101,17 @@ def test_every_source_is_numbered_and_cited(jarrow):
     assert "Start with a Spermidine customer concept test." in text["Executive summary"]
 
 
+
+def test_a_lead_on_watch_is_not_presented_as_a_test(jarrow):
+    approved(jarrow, "Spermidine", [obs(url="https://reddit.com/a")], status="monitor",
+             test_type="monitor", next_step="Set monthly Trends tracking.")
+
+    summary = {s["heading"]: s["text"] for s in brief(jarrow).sections}["Executive summary"]
+
+    assert "Our recommendation. Keep Spermidine on watch first" in summary
+    assert "agree the monitoring step: set monthly Trends tracking." in summary
+    assert "budget" not in summary
+
 def test_analyst_o_numbers_become_this_briefs_source_numbers(jarrow):
     reddit = obs(url="https://reddit.com/a")
     approved(jarrow, "Spermidine", [reddit],

@@ -264,7 +264,7 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
                     + ", not checked against any study it mentions."
                     + (f" The creator {promoted}." if promoted else "")
                 ),
-                event_key=f"item-{item.duplicate_of_id or item.pk}",
+                event_key=_event_key(item),
                 entered_by=COLLECTED_BY,
                 provenance=f"{marker}; claim C{claim.pk}",
             )
@@ -273,6 +273,18 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
     if new:
         attach(candidate, new, actor_label=actor_label)
     return new
+
+
+def _event_key(item) -> str:
+    """One creator's repeated posts are one voice, not several independent events.
+
+    Four Timeline gummy posts from one TikTok account counted as four
+    independent events, beside the brief saying they were brand-linked.
+    """
+    handle = (item.creator or "").strip().lower()
+    if item.platform in ("tiktok", "instagram") and handle.startswith("@"):
+        return f"creator-{item.platform}:{handle}"
+    return f"item-{item.duplicate_of_id or item.pk}"
 
 
 def _said(item) -> str:

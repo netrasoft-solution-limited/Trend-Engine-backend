@@ -20,8 +20,24 @@ def test_a_brief_names_its_channel_gaps_and_the_caption_only_limit(policy):  # n
 
     gaps = coverage_gaps([item])
 
-    assert "no collected item from podcasts, YouTube, TikTok, Reddit" in gaps
+    assert "no collected item from podcasts, YouTube, TikTok or Reddit is cited" in gaps
     assert "captions and comments only" in gaps
     assert "Monthly search volumes are unavailable" in gaps
     line = _source_line(ContentItem.objects.get())
     assert line.endswith("— Instagram (caption and comments only; speech not transcribed)")
+
+
+@pytest.mark.parametrize("caption", [
+    "Loving these gummies #uropartner", "Skin glow #gifted", "Found it #TikTokShop",
+    "Day 3 #kucibrandambassador",
+])
+def test_brand_partner_and_shop_tags_mark_a_post_as_promotional(caption):
+    from apps.evidence.models import promotion_reason
+
+    assert promotion_reason(caption)
+
+
+def test_an_ordinary_caption_is_not_promotional():
+    from apps.evidence.models import promotion_reason
+
+    assert not promotion_reason("My partner and I tried mushrooms #longevity")

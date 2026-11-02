@@ -31,7 +31,10 @@ MAX_TRANSCRIPT_ATTEMPTS = 10
 #: What a creator writes when a post is paid for or earns commission. O64 was
 #: titled "#affiliate" and still counted as independent discussion (Mark, 31 Oct).
 PROMOTION_MARKS = re.compile(
-    r"#(?:ad|ads|affiliate|sponsored|partner|paidpartnership|gifted)\b"
+    # "#uropartner" and "#kucipartner" are brand partnership tags too, and a
+    # TikTok Shop tag means the creator earns on the sale.
+    r"#(?:ad|ads|affiliate|sponsored|\w*partner|paidpartnership|gifted|\w*ambassador"
+    r"|tiktokshop\w*|tiktokmademebuyit)\b"
     r"|affiliate link|amazon associate|earn(?:s)? (?:a )?(?:small )?commission"
     r"|from qualifying purchases|sponsored by|paid partnership|use (?:my )?code\b",
     re.IGNORECASE,

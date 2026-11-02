@@ -35,7 +35,7 @@ from django.db.models import Q
 from apps.clients import services as client_services
 from apps.clients.models import ClientAsset
 from apps.enrichment.models import Claim
-from apps.evidence.models import ContentItem
+from apps.evidence.models import ContentItem, TranscriptArtifact
 from apps.intelligence.models import Signal, SignalEvidence
 from apps.scoring import benchmark
 from apps.scoring.models import ClientSignalScore, Recommendation
@@ -285,8 +285,8 @@ def _about(organization, developments, sources) -> dict:
     return {
         "heading": "About this brief",
         "text": (
-            f"This brief reviews what people discussed in podcasts, YouTube and online "
-            f"communities, and where the {organization.name} range fits those "
+            f"This brief reviews what people discussed in podcasts, YouTube, TikTok, "
+            f"Instagram and Reddit, and where the {organization.name} range fits those "
             f"conversations. {window_sentence(sources)}\n\n"
             f"{caution} Every claim is linked to a dated source, listed in full at the "
             f"end.\n\n{REVIEW_STATUS}"
@@ -333,7 +333,7 @@ def _executive_summary(organization, developments, watched, sources) -> dict:
     return {
         "heading": "Executive summary",
         "text": (
-            f"Our recommendation. Lead with {_lower_first(lead.signal.title)} "
+            f"Our recommendation. Lead with the first story, “{lead.signal.title}” "
             f"({lead.signal.get_maturity_display().lower()}). "
             f"{_first_sentence(client_facing(lead.recommendation.why_it_matters))}\n\n"
             f"{' · '.join(c for c in counts if c)}.\n\n"
@@ -575,7 +575,11 @@ def coverage_gaps(items) -> str:
     missing = [labels[c] for c in CHANNELS if c not in present]
     lines = []
     if missing:
-        lines.append(f"Coverage gaps: no collected item from {', '.join(missing)} is cited here.")
+        names = (
+            missing[0] if len(missing) == 1
+            else f"{', '.join(missing[:-1])} or {missing[-1]}"
+        )
+        lines.append(f"Coverage gaps: no collected item from {names} is cited here.")
     if "instagram" in present:
         lines.append("Instagram Reels are read from captions and comments only; their speech "
                      "is not transcribed.")
@@ -660,10 +664,22 @@ def _cite(sources: OrderedDict, key: tuple, obj) -> int:
     return list(sources).index(key) + 1
 
 
+#: Text with no timings, so a quote from it carries no timestamp.
+UNTIMED = {
+    TranscriptArtifact.Method.POST_TEXT,
+    TranscriptArtifact.Method.VIRLO,
+    TranscriptArtifact.Method.CAPTION_COMMENTS,
+}
+
+
 def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
     """One quoted claim. Given a registry, it is cited by its number in it."""
     item = claim.content_item
     seconds = claim.segment.start_seconds if claim.segment_id else None
+    if getattr(getattr(item, "transcript", None), "method", "") in UNTIMED:
+        # A post, a caption or a Virlo transcript has no timings: "at 0:00"
+        # would point the reader at a moment nobody measured.
+        seconds = None
     quote = (claim.quote or claim.text).strip()
     if len(quote) > QUOTE_CHARS:
         quote = quote[: QUOTE_CHARS - 1].rsplit(" ", 1)[0] + "…"
@@ -783,10 +799,6 @@ def _first_sentence(text: str) -> str:
         if end in text:
             return text.split(end, 1)[0] + end.strip()
     return text
-
-
-def _lower_first(text: str) -> str:
-    return text[:1].lower() + text[1:] if text[:2] != text[:2].upper() else text
 
 
 def _possessive(name: str) -> str:

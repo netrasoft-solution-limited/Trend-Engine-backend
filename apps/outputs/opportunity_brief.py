@@ -152,17 +152,27 @@ def _summary(organization, candidates, note, sources) -> dict:
     )
     step = lead.next_step.rstrip(".")
     step = step[:1].lower() + step[1:]
+    if lead.status == Candidate.Status.MONITOR:
+        # Nothing is ready to test, so there is no budget to ask for: "Start
+        # with a Spermidine monitor" read as a product (Mark would ask which).
+        recommendation = f"Keep {lead.name} on watch first; it is not ready to test yet."
+        decision = f"Confirm the portfolio gaps and agree the monitoring step: {step}."
+    else:
+        recommendation = f"Start with {start}."
+        decision = (
+            f"Confirm the portfolio gaps and agree to {step}, with a budget and "
+            f"success criteria."
+        )
     return {
         "heading": "Executive summary",
         "text": (
-            f"Our recommendation. Start with {start}. "
+            f"Our recommendation. {recommendation} "
             f"{_first_sentence(_cited(lead.why_it_matters, lead, sources)) or lead.opening}\n\n"
             f"{len(candidates)} candidate ingredient(s) reviewed · {len(absent)} of "
             f"{len(candidates)} not found in {listings} listings.\n\n"
             + "\n".join(lines)
             + f"\n\n{gap}{confirm}\n\n"
-            f"The decision we need. Confirm the portfolio gaps and agree to {step}, "
-            f"with a budget and success criteria.\n\n{note}"
+            f"The decision we need. {decision}\n\n{note}"
         ),
     }
 
@@ -242,8 +252,9 @@ def _corroboration(candidates) -> dict:
         "heading": "What is corroborated across channels",
         "text": "\n".join(lines) + "\n\n"
         "Counts are independent events: the same story told in a podcast and its video, or "
-        "two posts about one study, counts once. Paid, brand and older material is shown but "
-        f"does not count as corroboration. Search is estimates, not events. {closing}",
+        "two posts about one study, counts once, and so do one creator's repeated posts. "
+        "Paid, brand and older material is shown but does not count as corroboration. "
+        f"Search is estimates, not events. {closing}",
     }
 
 
