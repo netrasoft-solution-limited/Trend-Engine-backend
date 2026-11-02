@@ -237,6 +237,12 @@ def _assemblyai(item: ContentItem) -> Transcript:
 
 def _virlo(item: ContentItem):
     from apps.connectors.factory import ConnectorUnavailable, virlo_for
+    from apps.evidence.services.spend import virlo_calls_left
+
+    left = virlo_calls_left()
+    if left is not None and left < 1:
+        # FAILED, not Unavailable: the item is still worth reading next month.
+        raise Failed("Virlo's monthly cap is reached")
 
     try:
         return virlo_for(item.source, max_calls=2)

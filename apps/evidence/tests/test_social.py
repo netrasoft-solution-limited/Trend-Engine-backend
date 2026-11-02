@@ -120,3 +120,17 @@ def test_instagram_is_read_from_caption_and_comments_and_labelled(policy, monkey
     assert "Does it upset your stomach?" in item.transcript.text
     assert [r.step for r in outcome.rungs] == ["virlo_transcript", "caption_comments"]
 
+
+
+def test_virlo_stops_at_its_monthly_cap(policy, monkeypatch):
+    from apps.ingestion.models import IngestionRun
+
+    policy.provider.monthly_cap_usd = Decimal("1.00")
+    policy.provider.save()
+    source = social("TikTok — protein", "tiktok", policy)
+    IngestionRun.objects.create(source=source, status="succeeded", cost_usd=Decimal("0.99"))
+    monkeypatch.setattr("apps.connectors.factory.virlo_for",
+                        lambda s, max_calls=0: pytest.fail("called past the cap"))
+
+    with pytest.raises(collection.NotCollectable, match="monthly cap"):
+        collection.collect(source)

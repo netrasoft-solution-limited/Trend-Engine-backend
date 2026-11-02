@@ -128,8 +128,17 @@ def _social(source: Source, limit: int) -> list[dict]:
             queries, since=since.date().isoformat(), max_items=limit
         )
     elif platform in ("tiktok", "instagram"):
+        from apps.evidence.services.spend import virlo_calls_left, virlo_month_spend
+
         pages = int(config.get("pages") or SOCIAL_PAGES)
-        connector = virlo_for(source, max_calls=len(queries) * pages)
+        calls = len(queries) * pages
+        left = virlo_calls_left()
+        if left is not None and left < calls:
+            raise NotCollectable(
+                f"{source.name}: Virlo's monthly cap is reached (${virlo_month_spend()} spent "
+                f"this month). Raise the cap under Vendor keys, or wait for next month."
+            )
+        connector = virlo_for(source, max_calls=calls)
         rows = []
         try:
             for query in queries:
