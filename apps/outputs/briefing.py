@@ -34,7 +34,7 @@ from django.db.models import Q
 
 from apps.clients import services as client_services
 from apps.clients.models import ClientAsset
-from apps.enrichment.models import Claim
+from apps.enrichment.models import CORRECTION_NOTE, Claim
 from apps.evidence.models import ContentItem, TranscriptArtifact
 from apps.intelligence.models import Signal, SignalEvidence
 from apps.scoring import benchmark
@@ -917,7 +917,7 @@ def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
         # A post, a caption or a Virlo transcript has no timings: "at 0:00"
         # would point the reader at a moment nobody measured.
         seconds = None
-    quote = (claim.quote or claim.text).strip()
+    quote = claim.shown_quote.strip()
     if len(quote) > QUOTE_CHARS:
         quote = quote[: QUOTE_CHARS - 1].rsplit(" ", 1)[0] + "…"
     who = item.creator or item.source.name
@@ -926,6 +926,8 @@ def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
     where = f"[{title}]({link})" if link else f"“{title}”"
     at = f" at {_timestamp(seconds)}" if seconds is not None else ""
     cited = " The speaker cites a study." if claim.is_cited else ""
+    if claim.quote_corrections:
+        cited += f" {CORRECTION_NOTE}"
     older = (
         f" Older material: published {_item_date(item):%-d %b %Y}, before the "
         f"{WINDOW_DAYS}-day window." if is_older(item) else ""

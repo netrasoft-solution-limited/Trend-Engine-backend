@@ -123,6 +123,11 @@ class Claim(models.Model):
     #: Verbatim from the segment. PRD §6.6 requires quoted and paraphrased
     #: claims to map back to stored spans, so the exact words are kept.
     quote = models.TextField(blank=True)
+    #: Transcription errors corrected by an operator, as [{"wrong", "right",
+    #: "by", "at"}]. The quote itself stays verbatim; renderers show each
+    #: correction in square brackets and say so (Mark, 15 Nov: YouTube's
+    #: captions turned "ETH Zurich" into "echol polytenique federal deozan").
+    quote_corrections = models.JSONField(default=list, blank=True)
 
     #: Whether the speaker cited anything. Practitioner commentary and a cited
     #: trial are both evidence — of different weight — and conflating them is
@@ -139,6 +144,11 @@ class Claim(models.Model):
     def __str__(self) -> str:
         return self.text[:80]
 
+
+    @property
+    def shown_quote(self) -> str:
+        """The quote with each correction in square brackets."""
+        return apply_corrections(self.quote or self.text, self.quote_corrections)
 
 class Question(models.Model):
     """Something an audience asked, or a host answered unprompted.
@@ -168,3 +178,15 @@ class Question(models.Model):
 
     def __str__(self) -> str:
         return self.text[:80]
+
+
+#: Said wherever a corrected quote is shown.
+CORRECTION_NOTE = "Transcription corrected in brackets."
+
+
+def apply_corrections(text: str, corrections) -> str:
+    for c in corrections or []:
+        wrong, right = (c.get("wrong") or "").strip(), (c.get("right") or "").strip()
+        if wrong and right:
+            text = text.replace(wrong, f"[{right}]")
+    return text

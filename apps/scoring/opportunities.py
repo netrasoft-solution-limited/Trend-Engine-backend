@@ -271,7 +271,7 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
                 published_at=published,
                 observed_at=today,
                 topic=candidate.name,
-                excerpt=f"{item.creator or item.source.name}: “{claim.quote.strip()[:280]}”",
+                excerpt=f"{item.creator or item.source.name}: “{claim.shown_quote.strip()[:280]}”",
                 is_old_material=bool(published and published < window_start),
                 # Affiliate and paid posts are evidence of marketing, not of
                 # independent interest, and the brief counts them apart.

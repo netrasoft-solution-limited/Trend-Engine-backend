@@ -713,3 +713,32 @@ def test_the_method_reports_podcast_coverage_from_the_records(jarrow, approved):
 
     assert "Podcasts: 3 episode(s) published in the window from 1 show(s) were collected" in method
     assert "episode(s) are quoted in this brief" in method
+
+
+def test_a_corrected_transcription_shows_in_brackets_and_says_so(jarrow, approved, evidence):
+    """YouTube's captions turned "ETH Zurich" into "echol polytenique federal
+    deozan" (15 Nov). The quote stays verbatim on the claim; outputs show the
+    correction in brackets with a note."""
+    from apps.enrichment.corrections import CorrectionError, correct_quote
+    from apps.evidence.models import Observation
+
+    _, claims = evidence
+    claim = claims["glycinate"]
+    copy = Observation.objects.create(
+        url="https://example.com/c", title="Copy", source_type="youtube",
+        observed_at=timezone.localdate(), entered_by="abu",
+        excerpt=f"Dr A: “{claim.quote}”",
+        provenance=f"Collected automatically: item 1; claim C{claim.pk}",
+    )
+
+    correct_quote(claim, wrong="older adults", right="adults over 65", actor_label="abu")
+    with pytest.raises(CorrectionError):
+        correct_quote(claim, wrong="not in it", right="x", actor_label="abu")
+
+    claim.refresh_from_db()
+    copy.refresh_from_db()
+    body = text_of(brief_for(jarrow))
+    assert claim.quote.endswith("older adults"), "the verbatim quote is kept"
+    assert "improves sleep in [adults over 65]" in body
+    assert "Transcription corrected in brackets." in body
+    assert "[adults over 65]" in copy.excerpt and "corrected in brackets" in copy.limitations
