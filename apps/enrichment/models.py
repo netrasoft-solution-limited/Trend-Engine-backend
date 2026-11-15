@@ -39,6 +39,9 @@ class ModelRun(models.Model):
         DETECTION = "detection", "Signal detection"
         #: Strongest tier, client-facing (Arch §10.3).
         DRAFTING = "drafting", "Drafting"
+        #: Naming the ingredients a window's conversations mention, so ones the
+        #: client does not sell can be proposed as candidates (Mark, 15 Nov).
+        DISCOVERY = "discovery", "Ingredient discovery"
 
     class Outcome(models.TextChoices):
         SUCCEEDED = "succeeded", "Succeeded"

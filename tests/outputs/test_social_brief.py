@@ -22,7 +22,7 @@ def test_a_brief_names_its_channel_gaps_and_the_caption_only_limit(policy):  # n
 
     assert "no collected item from podcasts, YouTube, TikTok or Reddit is cited" in gaps
     assert "captions and comments only" in gaps
-    assert "Monthly search volumes are unavailable" in gaps
+    assert "Monthly keyword volumes need a paid keyword tool" in gaps
     line = _source_line(ContentItem.objects.get())
     assert line.endswith("— Instagram (caption and comments only; speech not transcribed)")
 

@@ -23,6 +23,7 @@ import logging
 import re
 
 from django.db import transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from pydantic import BaseModel, Field
 
@@ -220,8 +221,12 @@ def collect(candidate: Candidate, *, actor_label: str) -> list[int]:
     names = [candidate.name, *candidate.aliases]
     patterns = [_pattern(n) for n in names if n.strip()]
     since = timezone.now() - timedelta(days=COLLECT_DAYS)
+    # By publication date: an item found this week can be months old, and
+    # collecting on discovery date let pre-window posts in (Mark, 15 Nov).
     claims = (
-        Claim.objects.filter(is_sponsored=False, content_item__discovered_at__gte=since)
+        Claim.objects.filter(is_sponsored=False)
+        .annotate(said=Coalesce("content_item__published_at", "content_item__discovered_at"))
+        .filter(said__gte=since)
         .exclude(content_item__duplicate_status="confirmed")
         .select_related("content_item__source")
         .order_by("-is_cited", "pk")

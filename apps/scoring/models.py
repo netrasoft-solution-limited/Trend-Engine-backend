@@ -371,3 +371,41 @@ class BenchmarkAnswer(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.assistant} on {self.run_date}: {self.question[:40]}"
+
+
+class DiscoveredIngredient(TenantScopedModel):
+    """An ingredient the window's conversations discuss that the client does
+    not appear to sell and no candidate covers yet.
+
+    Mark, 15 Nov: "demonstrate that discovery can surface opportunities beyond
+    a fixed list rather than only refreshing those three names." Proposed by
+    `apps.scoring.discovery`, counted from collected, non-promotional claims;
+    an analyst decides whether it becomes a Candidate.
+    """
+
+    class Status(models.TextChoices):
+        NEW = "new", "Not yet assessed"
+        ADDED = "added", "Added as a candidate"
+        DISMISSED = "dismissed", "Dismissed"
+
+    name = models.CharField(max_length=120)
+    #: Distinct collected items, creators and channels that discuss it.
+    items = models.PositiveIntegerField(default=0)
+    creators = models.PositiveIntegerField(default=0)
+    channels = models.JSONField(default=list, blank=True)
+    #: The claim subjects grouped under this name, and a few example claims.
+    subjects = models.JSONField(default=list, blank=True)
+    claim_ids = models.JSONField(default=list, blank=True)
+    window_start = models.DateField()
+    window_end = models.DateField()
+    discovered_at = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
+    candidate = models.ForeignKey(
+        Candidate, on_delete=models.SET_NULL, null=True, blank=True, related_name="discoveries"
+    )
+
+    class Meta:
+        ordering = ("organization", "-discovered_at", "-items", "name")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.items} items)"

@@ -40,6 +40,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from pydantic import BaseModel, Field
 
+from apps.enrichment import promotion
 from apps.enrichment.domain import DOMAIN_PACK_VERSION, domain_pack
 from apps.enrichment.llm.client import (
     LLMClient,
@@ -171,14 +172,39 @@ def evidence_date():
 
 
 def window_claims(now: datetime, *, batch: int = 0) -> list[Claim]:
-    start = batch * MAX_CLAIMS
-    return list(
+    """One batch of the window's claims, channels taken in turn.
+
+    Newest-first alone let a busy week of short social posts fill every daily
+    batch, and podcast claims (fewer items, published days earlier) never
+    reached the model: 809 podcast claims in the 16 Oct–15 Nov window, and no
+    approved story cited one (Mark, 15 Nov). Each channel is still read newest
+    first; the channels are interleaved, so every batch carries each of them.
+    """
+    claims = list(
         Claim.objects.filter(is_sponsored=False)
         .annotate(said_at=evidence_date())
         .filter(said_at__gte=now - timedelta(days=WINDOW_DAYS))
         .select_related("content_item__source", "content_item__duplicate_of__source")
-        .order_by("-said_at", "-pk")[start:start + MAX_CLAIMS]
+        .order_by("-said_at", "-pk")
     )
+    start = batch * MAX_CLAIMS
+    return interleave_channels(claims)[start:start + MAX_CLAIMS]
+
+
+def interleave_channels(claims: list[Claim]) -> list[Claim]:
+    """Round-robin across channels, keeping each channel's own order."""
+    by_channel: dict[str, list[Claim]] = {}
+    for claim in claims:
+        by_channel.setdefault(claim.content_item.platform or "other", []).append(claim)
+    queues = list(by_channel.values())
+    ordered: list[Claim] = []
+    position = 0
+    while len(ordered) < len(claims):
+        for queue in queues:
+            if position < len(queue):
+                ordered.append(queue[position])
+        position += 1
+    return ordered
 
 
 def detect(
@@ -195,6 +221,8 @@ def detect(
     one opened.
     """
     now = now or timezone.now()
+    # A promotional mark made anywhere since the last run counts from now on.
+    promotion.reclassify(actor_label=health.ACTOR)
     result = DetectionResult()
     llm = client or LLMClient()
     batch = 0

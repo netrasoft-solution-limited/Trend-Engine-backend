@@ -18,13 +18,18 @@ from apps.scoring import opportunities
 from apps.scoring.models import Candidate
 
 from .briefing import (
+    REFERENCE_TYPES,
     REVIEW_STATUS,
+    SEARCH_LIMITS,
     Brief,
     _cell,
     _cite,
     _first_sentence,
     _sources,
+    observation_is_older,
+    observation_is_promotional,
     observation_line,
+    research_window,
     window_sentence,
 )
 from .services import DraftingError
@@ -42,6 +47,74 @@ CHANNELS = OrderedDict([
     ("Reddit and communities", {"reddit"}),
     ("Search", {"search_estimate", "google_trends"}),
 ])
+
+
+#: A Trends reading counts as current research only if it was retrieved this
+#: recently. The 15 Nov memo carried a comparison retrieved 20 Oct that ended
+#: 17 Oct, presented as current (Mark, 15 Nov).
+FRESH_SEARCH_DAYS = 14
+
+SEARCH_TYPES = CHANNELS["Search"]
+
+CURRENT, PROMOTIONAL, OLDER, UNDATED, REFERENCE, SEARCH = (
+    "current", "promotional", "older", "undated", "reference", "search",
+)
+
+
+def evidence_class(o: Observation) -> str:
+    """What an observation can count as, decided by its date when the brief is built."""
+    if o.source_type in REFERENCE_TYPES:
+        return REFERENCE
+    if o.source_type in SEARCH_TYPES:
+        return SEARCH
+    if observation_is_promotional(o):
+        return PROMOTIONAL
+    if observation_is_older(o):
+        return OLDER
+    if not o.published_at:
+        return UNDATED
+    return CURRENT
+
+
+def search_is_fresh(o: Observation) -> bool:
+    """Only a Trends reading retrieved in the last FRESH_SEARCH_DAYS is current.
+    Volume estimates are 12-month averages: background with their date, never
+    fresh research."""
+    from datetime import timedelta
+
+    if o.metric_kind != Observation.MetricKind.TRENDS:
+        return False
+    return o.observed_at >= research_window()[1] - timedelta(days=FRESH_SEARCH_DAYS)
+
+
+def event_key(o: Observation) -> str:
+    """One key per independent event: the analyst's event, else the post itself."""
+    return o.event_key.strip().lower() or o.media_key or f"observation-{o.pk}"
+
+
+def channel_counts(c: Candidate) -> OrderedDict:
+    """Current, independent events per channel, each event counted once across
+    all channels (Mark, 15 Nov: deduplicate repeated stories and creator posts).
+    Search counts a fresh Trends reading only."""
+    counts: OrderedDict[str, dict] = OrderedDict(
+        (ch, {"current": 0, "excluded": 0}) for ch in CHANNELS
+    )
+    seen: set[str] = set()
+    for o in sorted(c.observations.all(), key=lambda o: (o.published_at or o.observed_at, o.pk),
+                    reverse=True):
+        channel = next((ch for ch, types in CHANNELS.items() if o.source_type in types), None)
+        if channel is None:
+            continue
+        if channel == "Search":
+            counts[channel]["current" if search_is_fresh(o) else "excluded"] += 1
+            continue
+        key = event_key(o)
+        if evidence_class(o) != CURRENT:
+            counts[channel]["excluded"] += 1
+        elif key not in seen:
+            seen.add(key)
+            counts[channel]["current"] += 1
+    return counts
 
 
 def approved_candidates(organization) -> list[Candidate]:
@@ -66,19 +139,31 @@ def sections_for(organization) -> Brief:
 
     sources: OrderedDict[tuple, object] = OrderedDict()
     note = RESEARCH_NOTE.format(client=organization.name)
+    about = _about(organization, candidates, sources, note)
     body = [_candidate(organization, n, c, sources) for n, c in enumerate(candidates, start=1)]
     demand = _search_demand(candidates, sources)
     corroboration = _corroboration(candidates)
     profiles = {c.gap_check.get("profile") for c in candidates if c.gap_check.get("profile")}
+    discovered = _discovered(organization)
 
+    # Mark, 15 Nov: what changed, the strongest evidence, the gap and the
+    # action up front; the detailed evidence in appendices.
     sections = [
-        _about(organization, candidates, sources, note),
+        about,
         _summary(organization, candidates, note, sources),
-        *([demand] if demand else []),
-        corroboration,
-        *body,
-        _reading(),
-        _sources(sources),
+        _what_changed(organization, candidates),
+        *([discovered] if discovered else []),
+        {"heading": "Appendix A: Evidence by candidate",
+         "text": "Each candidate in full. Current evidence (published inside the research "
+         "window, independent of any brand) is listed first and is the only evidence "
+         "counted. Brand and promotional activity, older material and undated items "
+         "follow, labelled, and are not counted."},
+        *[{**section, "heading": f"A{n}. {section['heading']}"}
+          for n, section in enumerate(body, start=1)],
+        {**corroboration, "heading": "Appendix B: What is corroborated across channels"},
+        {**demand, "heading": "Appendix C: Search demand"},
+        {**_reading(), "heading": "Appendix D: How to read the evidence"},
+        {**_split_sources(sources), "heading": "Appendix E: Sources"},
     ]
     return Brief(sections, ", ".join(sorted(profiles)), len(candidates))
 
@@ -163,16 +248,111 @@ def _summary(organization, candidates, note, sources) -> dict:
             f"Confirm the portfolio gaps and agree to {step}, with a budget and "
             f"success criteria."
         )
+    blocks = []
+    for n, c in enumerate(candidates, start=1):
+        counts = channel_counts(c)
+        present = [ch for ch, v in counts.items() if v["current"]]
+        missing = [ch for ch, v in counts.items() if not v["current"]]
+        best = _strongest(c)
+        beside = f" It would sit beside {', '.join(c.adjacent)}." if c.adjacent else ""
+        blocks.append("\n".join([
+            f"{n}. {c.name}: {c.get_status_display().lower()}",
+            "· Current evidence: "
+            + (", ".join(f"{ch.lower()} {counts[ch]['current']}" for ch in present) or "none")
+            + " independent event(s)"
+            + (f"; none in {', '.join(m.lower() for m in missing)}" if missing else "")
+            + ".",
+            "· Strongest current evidence: "
+            + (observation_line(best, sources) if best else "none inside the window."),
+            f"· {organization.name} portfolio gap: {opportunities.gap_sentence(c)}{beside}",
+            f"· Recommended action: {c.next_step or _first_sentence(c.test_plan)}",
+        ]))
     return {
-        "heading": "Executive summary",
+        "heading": "Decision summary",
         "text": (
             f"Our recommendation. {recommendation} "
             f"{_first_sentence(_cited(lead.why_it_matters, lead, sources)) or lead.opening}\n\n"
             f"{len(candidates)} candidate ingredient(s) reviewed · {len(absent)} of "
             f"{len(candidates)} not found in {listings} listings.\n\n"
-            + "\n".join(lines)
+            + "\n\n".join(blocks)
+            + "\n\n" + "\n".join(lines)
             + f"\n\n{gap}{confirm}\n\n"
             f"The decision we need. {decision}\n\n{note}"
+        ),
+    }
+
+
+def _strongest(c: Candidate) -> Observation | None:
+    """The best current, independent observation: a podcast or video first,
+    then the newest."""
+    current = [o for o in c.observations.all() if evidence_class(o) == CURRENT]
+    if not current:
+        return None
+    spoken = {"podcast", "youtube"}
+    return sorted(
+        current, key=lambda o: (o.source_type not in spoken, -o.published_at.toordinal())
+    )[0]
+
+
+def _what_changed(organization, candidates) -> dict:
+    """Against the previous memo: new current evidence and status changes."""
+    from apps.outputs.models import Output, OutputType
+
+    previous = (
+        Output.objects.filter(organization=organization, type=OutputType.PRODUCT_MEMO)
+        .order_by("-updated_at").first()
+    )
+    version = previous.versions.order_by("-number").first() if previous else None
+    if version is None:
+        return {"heading": "What changed since the last memo",
+                "text": "This is the first opportunity memo for this client."}
+    since = version.created_at.date()
+    before = {}
+    for section in version.body or []:
+        found = re.match(r"(?:A\d+\. )?Candidate \d+: (.+?) — (.+)$", section.get("heading") or "")
+        if found:
+            before[found.group(1)] = found.group(2)
+    lines = [f"Compared with the memo of {since:%-d %B %Y}:"]
+    for c in candidates:
+        fresh = [o for o in c.observations.all()
+                 if evidence_class(o) == CURRENT and o.observed_at > since]
+        status = c.get_status_display().lower()
+        was = before.get(c.name)
+        change = (
+            "new in this memo" if was is None
+            else f"status unchanged ({status})" if was == status
+            else f"status {was} → {status}"
+        )
+        lines.append(f"· {c.name}: {change}; {len(fresh)} new current observation(s) since then.")
+    dropped = [name for name in before if name not in {c.name for c in candidates}]
+    if dropped:
+        lines.append(f"· No longer included: {', '.join(dropped)}.")
+    return {"heading": "What changed since the last memo", "text": "\n".join(lines)}
+
+
+def _discovered(organization) -> dict | None:
+    """Ingredients surfaced from the window's conversations that the catalogue
+    lacks and no candidate covers (Mark, 15 Nov: show discovery beyond a fixed list)."""
+    from apps.scoring import discovery
+
+    found = discovery.latest(organization)
+    if not found:
+        return None
+    lines = ["| Ingredient | Independent items | Creators | Channels | Status |"]
+    for d in found:
+        lines.append(
+            f"| {_cell(d.name)} | {d.items} | {d.creators} | {_cell(', '.join(d.channels))} | "
+            f"{_cell(d.get_status_display())} |"
+        )
+    when = found[0].discovered_at
+    return {
+        "heading": "Other ingredients surfaced this window",
+        "text": (
+            f"Found automatically on {when:%-d %B %Y} from the window's collected, "
+            f"non-promotional conversations: ingredients discussed that do not appear in the "
+            f"{organization.name} catalogue and are not among the candidates above. Counts are "
+            f"distinct items and creators. These are not yet assessed; one is added as a "
+            f"candidate only after an analyst reviews it.\n\n" + "\n".join(lines)
         ),
     }
 
@@ -182,7 +362,7 @@ def _figure(o: Observation) -> str:
     return value
 
 
-def _search_demand(candidates, sources) -> dict | None:
+def _search_demand(candidates, sources) -> dict:
     rows, trends = [], []
     for c in candidates:
         ordered = sorted(c.observations.all(), key=lambda o: -(o.metric_value or 0))
@@ -191,12 +371,15 @@ def _search_demand(candidates, sources) -> dict | None:
                 n = list(sources).index(("obs", o.pk)) + 1
                 rows.append(
                     f"| {_cell(c.name)} | {_cell(o.query)} | {_cell(_figure(o))} | "
-                    f"{_cell(o.geography)} | {_cell(o.provider)}, {_cell(o.period)} [{n}] |"
+                    f"{_cell(o.geography)} | {_cell(o.provider)}, {_cell(o.period)}; "
+                    f"retrieved {o.observed_at:%-d %b %Y}, not refreshed [{n}] |"
                 )
             elif o.metric_kind == Observation.MetricKind.TRENDS:
-                trends.append(f"· {c.name}: {observation_line(o, sources)}")
-    if not rows and not trends:
-        return None
+                state = (
+                    "current" if search_is_fresh(o)
+                    else f"not current: retrieved {o.observed_at:%-d %b %Y}"
+                )
+                trends.append(f"· {c.name} ({state}): {observation_line(o, sources)}")
     parts = []
     if rows:
         parts.append(
@@ -204,57 +387,64 @@ def _search_demand(candidates, sources) -> dict | None:
             + "\n".join(rows)
         )
         parts.append(
-            "These are estimated rolling monthly averages from third-party keyword data, not "
-            "the past 30 days or counts of buyers. Queries overlap and must not be added together."
+            "These are estimated rolling monthly averages from third-party keyword data, kept "
+            "with the date they were retrieved. They are not fresh research, not the past 30 "
+            "days and not counts of buyers. Queries overlap and must not be added together."
         )
     if trends:
         parts.append("Relative search interest (Google Trends, not volumes):\n" + "\n".join(trends))
+    without = [c.name for c in candidates
+               if not any(o.source_type in SEARCH_TYPES for o in c.observations.all())]
+    if without:
+        parts.append(f"No search data of any kind for: {', '.join(without)}.")
+    parts.append(SEARCH_LIMITS)
     return {"heading": "Search demand", "text": "\n\n".join(parts)}
 
 
 def _corroboration(candidates) -> dict:
-    """Channels with independent, current evidence. Paid, brand and older
-    material is shown but never makes a channel count as corroborated."""
+    """Channels with current, independent evidence, from `channel_counts`.
+
+    "Every channel" includes Search: Urolithin A had no search data at all and
+    was still said to have current evidence in every channel (Mark, 15 Nov).
+    """
     lines = ["| Candidate | " + " | ".join(CHANNELS) + " |"]
-    complete = []
+    complete, partial = [], []
     for c in candidates:
-        cells, independent = [], []
-        for channel, types in CHANNELS.items():
-            seen = [o for o in c.observations.all() if o.source_type in types]
+        counts = channel_counts(c)
+        cells = []
+        for channel, v in counts.items():
             if channel == "Search":
-                estimates = sum(
-                    1 for o in seen if o.metric_kind == Observation.MetricKind.SEARCH_ESTIMATE
-                )
-                trends = any(o.metric_kind == Observation.MetricKind.TRENDS for o in seen)
-                cell = "; ".join(p for p in (
-                    f"{estimates} estimate(s)" if estimates else "",
-                    "Trends reading" if trends else "",
-                ) if p) or "None found"
-                cells.append(cell)
-                continue
-            clean = {o.independence_key for o in seen
-                     if not (o.is_ad or o.is_brand_content or o.is_old_material)}
-            flagged = len({o.independence_key for o in seen}) - len(clean)
-            parts = [f"{len(clean)} independent current event(s)" if clean else ""]
-            if flagged:
-                parts.append(f"{flagged} paid, brand or older")
-            cells.append("; ".join(p for p in parts if p) or "None found")
-            independent.append(bool(clean))
-        if all(independent):
+                cell = (f"{v['current']} fresh Trends reading(s)" if v["current"]
+                        else "No fresh reading")
+                cell += f"; {v['excluded']} older or estimate(s)" if v["excluded"] else ""
+            else:
+                cell = (f"{v['current']} independent current event(s)" if v["current"]
+                        else "None current")
+                cell += f"; {v['excluded']} paid, brand, older or undated" if v["excluded"] else ""
+            cells.append(cell)
+        missing = [ch.lower() for ch, v in counts.items() if not v["current"]]
+        if missing:
+            partial.append(f"{c.name} (none current in {', '.join(missing)})")
+        else:
             complete.append(c.name)
         lines.append(f"| {_cell(c.name)} | " + " | ".join(cells) + " |")
-    closing = (
-        f"Independent, current evidence in every channel: {', '.join(complete)}."
-        if complete else
-        "No candidate has independent, current evidence in every channel within this review."
-    )
+    closing = []
+    if complete:
+        closing.append(
+            f"Current, independent evidence in every channel, search included: "
+            f"{', '.join(complete)}."
+        )
+    if partial:
+        closing.append("Not in every channel: " + "; ".join(partial) + ".")
     return {
         "heading": "What is corroborated across channels",
         "text": "\n".join(lines) + "\n\n"
-        "Counts are independent events: the same story told in a podcast and its video, or "
-        "two posts about one study, counts once, and so do one creator's repeated posts. "
-        "Paid, brand and older material is shown but does not count as corroboration. "
-        f"Search is estimates, not events. {closing}",
+        "Counts are independent events published inside the research window: the same story "
+        "told in a podcast and its video, or two posts about one study, counts once across "
+        "all channels, and so do one creator's repeated posts. Paid, brand, older and undated "
+        "material is shown in Appendix A but does not count. Search counts only a Google "
+        f"Trends reading retrieved in the last {FRESH_SEARCH_DAYS} days; volume estimates are "
+        f"12-month averages and never count as current. " + " ".join(closing),
     }
 
 
@@ -270,14 +460,25 @@ def _candidate(organization, n: int, c: Candidate, sources) -> dict:
     if c.internal_check != Candidate.InternalCheck.PENDING:
         parts[-1] += f" {c.get_internal_check_display()}."
     observations = sorted(c.observations.all(), key=lambda o: (o.published_at or o.observed_at))
-    if observations:
-        parts.append(
-            "What people are discussing:\n"
-            + "\n".join(
-                f"· {o.get_source_type_display()}. {observation_line(o, sources)}"
-                for o in observations
+    start, end = research_window()
+    groups = (
+        (CURRENT, f"Current evidence ({start:%-d %b}–{end:%-d %b %Y}), counted"),
+        (SEARCH, "Search readings (see Appendix C for what is current)"),
+        (PROMOTIONAL, "Brand and promotional activity: competitor context, not counted"),
+        (OLDER, f"Older context, published before {start:%-d %b %Y}: not counted"),
+        (UNDATED, "Undated: not counted"),
+        (REFERENCE, "Product and research references"),
+    )
+    for kind, title in groups:
+        chosen = [o for o in observations if evidence_class(o) == kind]
+        if chosen:
+            parts.append(
+                f"{title}:\n"
+                + "\n".join(
+                    f"· {o.get_source_type_display()}. {observation_line(o, sources)}"
+                    for o in chosen
+                )
             )
-        )
     if c.why_it_matters:
         parts.append(
             f"Why it could matter to {organization.name}. {_cited(c.why_it_matters, c, sources)}"
@@ -304,12 +505,36 @@ def _reading() -> dict:
             "· Social engagement is cumulative from posting to the date observed.\n"
             "· Advertisements and brand content show response to marketing, not independent "
             "demand, and are labelled wherever they appear.\n"
-            "· Monthly search volumes are unavailable: there is no keyword-tool data. Search "
-            "interest is Google Trends relative interest; any estimate carried from an "
-            "earlier report is labelled with its date and source.\n"
+            "· Monthly keyword volumes need a paid keyword tool, which is not in use; any "
+            "estimate shown is labelled with the date it was retrieved and its source. Search "
+            "interest is Google Trends relative interest, from Google's own export.\n"
             "· Instagram Reels are read from captions and comments only, never their speech. "
             "Reddit's public feed carries no score or comment count.\n"
             "· Observations are targeted examples, entered by an analyst or collected "
             "automatically from standing searches. They are not a representative sample."
         ),
     }
+
+
+def _split_sources(sources: OrderedDict) -> dict:
+    """Current sources first, then older context, each keeping its number."""
+    full = _sources(sources)
+    header, *lines = full["text"].split("\n")
+    older = {
+        n for n, ((kind, _), obj) in enumerate(sources.items(), start=1)
+        if kind == "obs" and evidence_class(obj) in (OLDER, UNDATED)
+    }
+
+    def number(line):
+        found = re.match(r"· \[(\d+)\]", line)
+        return int(found.group(1)) if found else 0
+
+    current = [line for line in lines if number(line) not in older]
+    previous = [line for line in lines if number(line) in older]
+    text = header + "\n" + "\n".join(current)
+    if previous:
+        text += (
+            "\n\nOlder or undated context (published before the research window or "
+            "undated; not counted as current evidence):\n" + "\n".join(previous)
+        )
+    return {"heading": "Sources", "text": text}

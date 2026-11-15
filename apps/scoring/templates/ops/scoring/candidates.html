@@ -47,6 +47,50 @@
     </div>
   </div>
 
+  <div class="card" id="discovered">
+    <div class="row">
+      <span class="name">Discovered this window</span>
+      <span class="state">{% if discovered %}found {{ discovered.0.discovered_at|date:"j M Y, H:i" }} UTC · {{ discovered.0.window_start|date:"j M" }}–{{ discovered.0.window_end|date:"j M Y" }}{% else %}not run yet{% endif %}</span>
+    </div>
+    <p class="note">
+      Ingredients raised in the window's collected, non-promotional conversations that the
+      live catalogue does not name and no candidate covers. Counts are distinct items and
+      creators. One model call names the ingredients; the counts come from the claims.
+    </p>
+    {% if discovered %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ingredient</th><th class="num">Items</th><th class="num">Creators</th><th>Channels</th><th>Raised as</th><th></th></tr></thead>
+          <tbody>
+            {% for d in discovered %}
+              <tr>
+                <td>{{ d.name }}</td>
+                <td class="num">{{ d.items }}</td>
+                <td class="num">{{ d.creators }}</td>
+                <td class="muted">{{ d.channels|join:", " }}</td>
+                <td class="muted">{{ d.subjects|slice:":3"|join:"; " }}</td>
+                <td>
+                  {% if d.status == "added" %}
+                    <a href="{% url 'ops-candidate' organization.slug d.candidate_id %}">candidate</a>
+                  {% else %}
+                    <form method="post" class="inline">{% csrf_token %}
+                      <input type="hidden" name="discovered" value="{{ d.pk }}">
+                      <button type="submit" name="action" value="discover.add" class="small">Add as candidate</button>
+                      <button type="submit" name="action" value="discover.dismiss" class="small secondary">Dismiss</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+    <form method="post" style="margin-top:8px">{% csrf_token %}
+      <button type="submit" name="action" value="discover.run" class="secondary">Run discovery on the current window</button>
+    </form>
+  </div>
+
   <div class="card">
     <span class="name">Add a candidate</span>
     <form method="post">

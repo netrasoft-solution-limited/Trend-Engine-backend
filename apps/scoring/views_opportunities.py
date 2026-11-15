@@ -14,11 +14,13 @@ from django.utils import timezone
 from django.views import View
 
 from apps.clients import services as client_services
+from apps.enrichment.llm.client import LLMInvalidOutput, LLMUnavailable
+from apps.enrichment.llm.costs import CostCapExceeded
 from apps.intelligence import review
 from apps.tenancy.context import scoped
 
-from . import benchmark, opportunities
-from .models import BenchmarkAnswer, Candidate
+from . import benchmark, discovery, opportunities
+from .models import BenchmarkAnswer, Candidate, DiscoveredIngredient
 from .views_review import _actor, _organization
 
 MAX_UPLOAD = 2_000_000
@@ -33,15 +35,20 @@ class CandidateListView(View):
                 .prefetch_related("observations")
             )
             profile = client_services.current_for(organization)
+            discovered = discovery.latest(organization)
         return render(request, "ops/scoring/candidates.html", {
             "organization": organization,
             "candidates": candidates,
             "profile": profile,
+            "discovered": discovered,
             "approved": sum(1 for c in candidates if c.is_approved and c.status != "rejected"),
         })
 
     def post(self, request, slug):
         organization = _organization(slug)
+        action = request.POST.get("action") or ""
+        if action.startswith("discover"):
+            return _discovery_action(request, organization, action)
         with scoped(organization):
             try:
                 candidate = opportunities.create(
@@ -203,3 +210,44 @@ class BenchmarkTemplateView(View):
         response = HttpResponse(benchmark.template_csv(), content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="ai-benchmark-template.csv"'
         return response
+
+
+def _discovery_back(slug):
+    return redirect(reverse("ops-candidates", args=[slug]) + "#discovered")
+
+
+def _discovery_action(request, organization, action):
+    """Run discovery, or add or dismiss one of its proposals."""
+    actor = _actor(request)
+    with scoped(organization):
+        try:
+            if action == "discover.run":
+                found = discovery.discover(organization, actor_label=actor)
+                messages.success(
+                    request,
+                    f"Discovery proposed {len(found)} ingredient(s) not in the catalogue."
+                    if found else "Discovery found no ingredient the catalogue lacks.",
+                )
+            else:
+                found = get_object_or_404(
+                    DiscoveredIngredient, organization=organization,
+                    pk=int(request.POST.get("discovered") or 0),
+                )
+                if action == "discover.add":
+                    candidate = discovery.add_as_candidate(found, actor_label=actor)
+                    messages.success(
+                        request,
+                        f"{candidate.name} is now a candidate with its current evidence "
+                        f"collected. Draft and review it before approving.",
+                    )
+                    return redirect(reverse("ops-candidate", args=[organization.slug,
+                                                                   candidate.pk]))
+                if action == "discover.dismiss":
+                    discovery.dismiss(found, actor_label=actor)
+                    messages.info(request, f"Dismissed {found.name}.")
+        except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
+            messages.error(request, f"Discovery failed: {exc}")
+        except opportunities.OpportunityError as exc:
+            messages.error(request, str(exc))
+    return _discovery_back(organization.slug)
+

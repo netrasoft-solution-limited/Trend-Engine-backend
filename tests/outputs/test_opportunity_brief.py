@@ -14,6 +14,15 @@ from apps.tenancy.context import scoped
 
 pytestmark = pytest.mark.django_db
 
+
+@pytest.fixture(autouse=True)
+def _brief_date(monkeypatch):
+    """These observations are dated October 2026: build the brief as of 20 Oct,
+    so they fall inside its 30-day window, whatever today is."""
+    from apps.outputs import briefing
+
+    monkeypatch.setattr(briefing, "_today", lambda: date(2026, 10, 20))
+
 evidence = shared.evidence
 jarrow = shared.jarrow
 
@@ -64,25 +73,29 @@ def test_the_brief_has_the_delivered_sections_in_priority_order(jarrow):
     headings = [s["heading"] for s in result.sections]
     text = {s["heading"]: s["text"] for s in result.sections}
 
-    assert headings[:4] == ["About this brief", "Executive summary", "Search demand",
-                            "What is corroborated across channels"]
-    assert headings[4:6] == ["Candidate 1: Spermidine — test now",
-                             "Candidate 2: Ergothioneine — keep on watch"]
-    assert headings[-2:] == ["How to read the evidence", "Sources"]
-    summary = text["Executive summary"]
+    # Mark, 15 Nov: decision summary first, evidence in appendices.
+    assert headings[:3] == ["About this brief", "Decision summary",
+                            "What changed since the last memo"]
+    assert "A1. Candidate 1: Spermidine — test now" in headings
+    assert "A2. Candidate 2: Ergothioneine — keep on watch" in headings
+    assert headings[-3:] == ["Appendix C: Search demand", "Appendix D: How to read the evidence",
+                             "Appendix E: Sources"]
+    summary = text["Decision summary"]
     assert "Our recommendation. Start with Spermidine." in summary
     assert "| 1 | Spermidine | Test now | Spermidine opening. | Test formats. |" in summary
     assert "None of the 2 was found" in summary
     assert "not a launch recommendation" in summary
-    assert "| Spermidine | spermidine | 14,800 | US |" in text["Search demand"]
-    assert "must not be added together" in text["Search demand"]
-    corroborated = text["What is corroborated across channels"]
+    assert "| Spermidine | spermidine | 14,800 | US |" in text["Appendix C: Search demand"]
+    assert "must not be added together" in text["Appendix C: Search demand"]
+    assert "retrieved 20 Oct 2026, not refreshed" in text["Appendix C: Search demand"]
+    corroborated = text["Appendix B: What is corroborated across channels"]
     assert (
-        "| Spermidine | None found | 1 independent current event(s); 1 paid, brand or older | "
-        "None found | 1 estimate(s) |"
+        "| Spermidine | None current | 1 independent current event(s); 1 paid, brand, older or "
+        "undated | None current | No fresh reading; 1 older or estimate(s) |"
     ) in corroborated
-    assert "No candidate has independent, current evidence in every channel" in corroborated
-    case = text["Candidate 1: Spermidine — test now"]
+    assert "Not in every channel: Spermidine (none current in podcast or video, reddit and " \
+        "communities, search)" in corroborated
+    case = text["A1. Candidate 1: Spermidine — test now"]
     assert "Labelled: advertisement." in case
     assert "4.6K items sold (global lifetime items sold)" in case
     assert "Gate. Workable margins." in case
@@ -95,10 +108,10 @@ def test_every_source_is_numbered_and_cited(jarrow):
 
     text = {s["heading"]: s["text"] for s in brief(jarrow).sections}
 
-    assert text["Sources"].count("· [") == 2
-    case = text["Candidate 1: Spermidine — test now"]
+    assert text["Appendix E: Sources"].count("· [") == 2
+    case = text["A1. Candidate 1: Spermidine — test now"]
     assert "[1]" in case and "[2]" in case
-    assert "Start with a Spermidine customer concept test." in text["Executive summary"]
+    assert "Start with a Spermidine customer concept test." in text["Decision summary"]
 
 
 
@@ -106,7 +119,7 @@ def test_a_lead_on_watch_is_not_presented_as_a_test(jarrow):
     approved(jarrow, "Spermidine", [obs(url="https://reddit.com/a")], status="monitor",
              test_type="monitor", next_step="Set monthly Trends tracking.")
 
-    summary = {s["heading"]: s["text"] for s in brief(jarrow).sections}["Executive summary"]
+    summary = {s["heading"]: s["text"] for s in brief(jarrow).sections}["Decision summary"]
 
     assert "Our recommendation. Keep Spermidine on watch first" in summary
     assert "agree the monitoring step: set monthly Trends tracking." in summary
@@ -118,7 +131,7 @@ def test_analyst_o_numbers_become_this_briefs_source_numbers(jarrow):
              why_it_matters=f"Shoppers ask for it (O{reddit.pk}, O999999).")
 
     text = {s["heading"]: s["text"] for s in brief(jarrow).sections}
-    case = text["Candidate 1: Spermidine — test now"]
+    case = text["A1. Candidate 1: Spermidine — test now"]
 
     assert "Shoppers ask for it [1]." in case
     assert f"O{reddit.pk}" not in case and "O999999" not in case
@@ -135,3 +148,77 @@ def test_older_material_does_not_set_the_window(jarrow):
     about = {s["heading"]: s["text"] for s in brief(jarrow).sections}["About this brief"]
 
     assert "published between 5 October and 12 October 2026" in about
+
+
+# ── Mark's 15 Nov review ────────────────────────────────────────────────────
+
+
+def test_older_and_undated_observations_never_count_as_current(jarrow):
+    """23 of 84 sources predated the window and several were not labelled."""
+    approved(jarrow, "Spermidine", [
+        obs(url="https://reddit.com/now", published_at=date(2026, 10, 18)),
+        obs(url="https://reddit.com/old", published_at=date(2026, 9, 10)),  # not flagged
+        obs(url="https://reddit.com/none", published_at=None),
+    ])
+
+    result = brief(jarrow)
+    text = {s["heading"]: s["text"] for s in result.sections}
+    case = text["A1. Candidate 1: Spermidine — test now"]
+
+    assert "1 independent current event(s); 2 paid, brand, older or undated" in (
+        text["Appendix B: What is corroborated across channels"]
+    )
+    assert "Older context, published before 20 Sep 2026: not counted" in case
+    assert "Undated: not counted" in case
+    assert "Older or undated context" in text["Appendix E: Sources"]
+
+
+def test_every_channel_includes_search(jarrow):
+    """Urolithin A had no search data and was said to have current evidence
+    'in every channel' (Mark, 15 Nov)."""
+    approved(jarrow, "Urolithin A", [
+        obs(url="https://podcasts.example/u", source_type="podcast",
+            published_at=date(2026, 10, 10)),
+        obs(url="https://tiktok.com/u", source_type="tiktok", published_at=date(2026, 10, 11)),
+        obs(url="https://reddit.com/u", published_at=date(2026, 10, 12)),
+    ])
+
+    text = {s["heading"]: s["text"] for s in brief(jarrow).sections}
+    corroborated = text["Appendix B: What is corroborated across channels"]
+
+    assert "every channel, search included" not in corroborated
+    assert "Not in every channel: Urolithin A (none current in search)" in corroborated
+    assert "No search data of any kind for: Urolithin A." in text["Appendix C: Search demand"]
+
+
+def test_the_same_event_counts_once_across_channels(jarrow):
+    approved(jarrow, "Spermidine", [
+        obs(url="https://youtube.com/a", source_type="youtube", event_key="study-x",
+            published_at=date(2026, 10, 10)),
+        obs(url="https://reddit.com/a", event_key="study-x", published_at=date(2026, 10, 11)),
+    ])
+
+    corroborated = {s["heading"]: s["text"] for s in brief(jarrow).sections}[
+        "Appendix B: What is corroborated across channels"
+    ]
+
+    assert corroborated.count("1 independent current event(s)") == 1
+
+
+def test_only_a_freshly_retrieved_trends_reading_counts_as_current_search(jarrow):
+    stale = obs(source_type="google_trends", metric_kind="trends_relative_interest",
+                metric_value=40, query="spermidine", provider="Google Trends", geography="US",
+                period="20 Sep–17 Oct 2026", observed_at=date(2026, 10, 1),
+                url="https://trends.google.com/a")
+    fresh = obs(source_type="google_trends", metric_kind="trends_relative_interest",
+                metric_value=45, query="spermidine", provider="Google Trends", geography="US",
+                period="22 Sep–19 Oct 2026", observed_at=date(2026, 10, 19),
+                url="https://trends.google.com/b")
+    approved(jarrow, "Spermidine", [stale, fresh])
+
+    text = {s["heading"]: s["text"] for s in brief(jarrow).sections}
+
+    assert "1 fresh Trends reading(s); 1 older or estimate(s)" in (
+        text["Appendix B: What is corroborated across channels"]
+    )
+    assert "(not current: retrieved 1 Oct 2026)" in text["Appendix C: Search demand"]

@@ -15,6 +15,7 @@ from django.views import View
 
 from .models import Observation
 from .services import observations as service
+from .services import trends_import
 
 MAX_UPLOAD = 2_000_000
 
@@ -63,6 +64,19 @@ class ObservationImportView(View):
             text = upload.read().decode("utf-8-sig")
         except UnicodeDecodeError:
             messages.error(request, "Save the sheet as CSV (UTF-8) and try again.")
+            return back
+        if trends_import.looks_like_export(text):
+            try:
+                saved = trends_import.save(trends_import.parse(text), entered_by=_actor(request))
+            except trends_import.TrendsImportError as exc:
+                messages.error(request, str(exc))
+                return back
+            messages.success(
+                request,
+                f"Imported {len(saved)} Google Trends reading(s): "
+                + "; ".join(f"O{o.pk} {o.query}" for o in saved)
+                + ". Attach them to candidates or stories by number.",
+            )
             return back
         rows, errors = service.parse_csv(text)
         if errors:

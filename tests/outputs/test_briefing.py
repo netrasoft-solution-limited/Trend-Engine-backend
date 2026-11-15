@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import io
 import re
+from datetime import UTC
 
 import pytest
+from django.utils import timezone
 
 from apps.enrichment.llm.client import LLMClient
 from apps.enrichment.tests.fakes import FakeTransport, respond
@@ -21,6 +23,7 @@ from apps.outputs.content_brief import ContentBriefDraft, OutlineSection
 from apps.outputs.exports.document import document_from_body
 from apps.outputs.services import DraftingError
 from apps.scoring import recommendations, signal_rank
+from apps.scoring.models import Recommendation
 from apps.scoring.tests import test_signal_rank as shared
 from apps.tenancy.context import scoped
 
@@ -91,9 +94,11 @@ def test_the_brief_says_what_changed_why_it_matters_and_what_to_do(jarrow, appro
     headings = [s["heading"] for s in brief.sections]
     body = text_of(brief)
 
-    assert headings[:2] == ["About this brief", "Executive summary"]
-    assert "Magnesium becomes a choice by goal" in headings
-    assert headings[-2:] == ["Coverage and method", "Sources"]
+    # Mark, 15 Nov: a decision summary first, the detail in appendices.
+    assert headings[:3] == ["About this brief", "Decision summary",
+                            "What changed since the last brief"]
+    assert "A1. Magnesium becomes a choice by goal" in headings
+    assert headings[-2:] == ["Appendix C: Coverage and method", "Appendix D: Sources"]
     assert "Next 14 days" in headings
     assert "What changed. Creators recommend magnesium forms by goal." in body
     assert f"Why it matters to {jarrow.name}. {approved.why_it_matters}" in body
@@ -276,7 +281,7 @@ def test_a_single_day_and_a_name_ending_in_s_read_naturally(jarrow, approved):
         jarrow.save(update_fields=["name"])
     sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
 
-    assert "Jarrow Formulas' profile" in sections["Coverage and method"]
+    assert "Jarrow Formulas' profile" in sections["Appendix C: Coverage and method"]
     about = sections["About this brief"]
     assert re.search(r" on \d{1,2} [A-Z][a-z]+ \d{4}", about) and "between" not in about
 
@@ -302,7 +307,7 @@ def test_each_development_states_its_status(jarrow, approved):
     body = text_of(brief)
 
     assert "Status. Recurring discussion: raised in more than one week" in body
-    assert "| Recurring discussion |" in brief.sections[1]["text"]
+    assert "· Status: Recurring discussion." in brief.sections[1]["text"]
 
 
 def test_the_recommendation_prompt_carries_the_status_and_the_rule(jarrow, evidence):
@@ -394,11 +399,11 @@ def test_the_family_map_assigns_every_listing_and_marks_the_featured_family(jarr
 
     sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
 
-    family = sections["The full portfolio"]
+    family = sections["Appendix B: The full portfolio"]
     assert "Each of the 3 listings" in family
     assert "| Sleep & Mood | 1 | Featured story | MagMind |" in family
     assert "| Gut & Digestion | 1 | Monitoring | Saccharomyces Boulardii |" in family
-    assert "3 listings reviewed · 3 listening families" in sections["Executive summary"]
+    assert "3 listings mapped" in sections["Decision summary"]
 
 
 def test_sources_are_numbered_once_and_cited_inline(jarrow, approved):
@@ -415,7 +420,7 @@ def test_sources_are_numbered_once_and_cited_inline(jarrow, approved):
 
     brief = brief_for(jarrow)
     sections = {s["heading"]: s["text"] for s in brief.sections}
-    sources = sections["Sources"].splitlines()[1:]
+    sources = sections["Appendix D: Sources"].splitlines()[1:]
     numbers = [re.match(r"· \[(\d+)\]", line).group(1) for line in sources]
 
     assert numbers == [str(n) for n in range(1, len(sources) + 1)]
@@ -423,8 +428,8 @@ def test_sources_are_numbered_once_and_cited_inline(jarrow, approved):
     n = re.match(r"· \[(\d+)\]", reddit_line).group(1)
     assert "8 Oct 2026" in reddit_line and "brand content" in reddit_line.lower()
     assert "Shopper cannot reconcile label numbers" in text_of(brief)
-    assert f"[{n}]" in sections["Magnesium becomes a choice by goal"]
-    assert "1 Reddit" in sections["Coverage and method"]
+    assert f"[{n}]" in sections["A1. Magnesium becomes a choice by goal"]
+    assert "1 Reddit" in sections["Appendix C: Coverage and method"]
 
 
 def test_outline_numbers_hold_when_a_later_section_adds_a_claim(jarrow, approved, evidence):
@@ -473,7 +478,7 @@ def test_a_story_carries_its_content_plan_and_says_which_version(jarrow, approve
         )
 
     story = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}[
-        "Magnesium becomes a choice by goal"
+        "A1. Magnesium becomes a choice by goal"
     ]
 
     assert (
@@ -506,8 +511,11 @@ def test_an_observation_with_no_public_page_names_where_it_came_from(db):
     assert "](" not in briefing.observation_line(o)
 
 
-def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidence):
+def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidence, monkeypatch):
+    # The observations are dated 1–9 Oct: brief as of 20 Oct, so they are current.
     from datetime import date
+
+    monkeypatch.setattr(briefing, "_today", lambda: date(2026, 10, 20))
 
     from apps.evidence.models import Observation
     from apps.intelligence import review
@@ -538,14 +546,15 @@ def test_an_analyst_led_story_says_so_and_cites_its_observations(jarrow, evidenc
         recommendations.decide(rec, approve=True, actor_label="abu")
     Signal.objects.filter(pk=signal.pk).update(state=Signal.State.APPROVED)
 
-    story = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}["Choosing a magnesium"]
+    sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
+    story = sections["A1. Choosing a magnesium"]
 
     assert "Status. Recurring discussion" in story
     assert "an analyst-led story from 3 observation(s), 2 independent event(s)" in story
     assert "[1]" in story and "[2]" in story
     sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
-    assert "No automatically collected item is cited" in sections["Coverage and method"]
-    assert "checked 20 Oct 2026 — [Product page]" in sections["Sources"]
+    assert "No automatically collected item is cited" in sections["Appendix C: Coverage and method"]
+    assert "checked 20 Oct 2026 — [Product page]" in sections["Appendix D: Sources"]
     assert "between 1 October and 9 October 2026" in sections["About this brief"], (
         "a checked date does not stretch the window"
     )
@@ -596,8 +605,9 @@ def test_the_brief_states_its_window_and_labels_older_collected_material(jarrow,
 
     sections = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}
 
-    assert "(the rolling 30 days to the date of this brief)" in sections["Coverage and method"]
-    story = sections["Magnesium becomes a choice by goal"]
+    method = sections["Appendix C: Coverage and method"]
+    assert "(the rolling 30 days to the date of this brief)" in method
+    story = sections["A1. Magnesium becomes a choice by goal"]
     assert "Older material: published" in story and "before the 30-day window" in story
 
 
@@ -617,3 +627,89 @@ def test_a_collected_start_time_is_not_doubled():
     item = ContentItem(url="https://www.youtube.com/watch?v=abc&t=423s")
     assert item.link_at(138) == "https://www.youtube.com/watch?v=abc&t=138s"
     assert item.clean_url == "https://www.youtube.com/watch?v=abc"
+
+
+# ── Mark's 15 Nov review ────────────────────────────────────────────────────
+
+
+def test_a_status_shows_its_periods_counts_and_change(jarrow, approved):
+    """'For anything labelled measured rising, show the current and baseline
+    periods, comparable counts and the resulting change.'"""
+    from datetime import datetime
+
+    Signal.objects.filter(code="SIG-3001").update(
+        maturity=Signal.Maturity.MEASURED_TREND,
+        scored_at=datetime(2026, 11, 15, 6, 0, tzinfo=UTC),
+        baseline={"weekly_items": [12, 6, 5, 4, 5, 3], "covered_streak": 6},
+    )
+
+    body = text_of(brief_for(jarrow))
+
+    assert "Current week (9 Nov–15 Nov): 12 item(s)." in body
+    assert "Baseline (12 Oct–8 Nov): 5.0 a week, from 5, 4, 5, 6 item(s)" in body
+    assert "Change: +140%." in body
+
+
+def test_a_story_whose_text_claims_a_trend_its_status_lacks_is_refused(jarrow, approved):
+    """NMN and D3/K2 had a recurring-discussion status and narrative calling
+    them rising (Mark, 15 Nov). The brief now refuses until the text is fixed."""
+    Signal.objects.filter(code="SIG-3001").update(maturity=Signal.Maturity.RECURRING)
+    with scoped(jarrow):
+        Recommendation.objects.filter(pk=approved.pk).update(
+            why_it_matters="Interest in magnesium forms is a rising trend among older adults."
+        )
+
+    refused = "SIG-3001 .recurring discussion. says 'a rising trend'"
+    with pytest.raises(DraftingError, match=refused):
+        brief_for(jarrow)
+
+
+def test_trend_words_are_allowed_only_for_a_measured_trend():
+    from apps.scoring.recommendations import status_conflicts
+
+    text = {"why_it_matters": "Growing interest in glycinate; muscle growth claims; "
+                              "Google Trends shows it. This trend brief notes it.",
+            "actions": []}
+
+    assert status_conflicts(text, Signal.Maturity.RECURRING) == ["Growing interest"]
+    assert status_conflicts(text, Signal.Maturity.MEASURED_TREND) == []
+
+
+def test_a_hand_marked_advert_leaves_the_story_everywhere(jarrow, approved, evidence):
+    """The Timeline gummies post was an advert in the memo and evidence in the
+    trend brief (Mark, 15 Nov). One mark now reaches both."""
+    from apps.evidence.models import Observation
+
+    _, claims = evidence
+    item = claims["threonate"].content_item
+    Observation.objects.create(
+        url="https://example.com/t", title="Promo", source_type="tiktok",
+        observed_at=timezone.localdate(), entered_by="abu", is_ad=True,
+        provenance=f"Collected automatically: item {item.pk}; claim C{claims['threonate'].pk}",
+    )
+
+    with scoped(jarrow):
+        from apps.publication.generate import generate
+
+        sections = generate(jarrow, "trend_brief").sections
+
+    claims["threonate"].refresh_from_db()
+    assert claims["threonate"].is_sponsored
+    assert "L-threonate is the form people choose" not in "\n".join(s["text"] for s in sections)
+
+
+def test_a_podcast_quote_is_chosen_before_a_second_from_another_channel(jarrow, approved):
+    sources = briefing.OrderedDict()
+    supporting, _ = briefing._evidence(approved.signal, sources)
+    channels = [obj.platform for (kind, _), obj in sources.items() if kind == "item"]
+
+    assert supporting and channels[0] == "podcast"
+
+
+def test_the_method_reports_podcast_coverage_from_the_records(jarrow, approved):
+    method = {s["heading"]: s["text"] for s in brief_for(jarrow).sections}[
+        "Appendix C: Coverage and method"
+    ]
+
+    assert "Podcasts: 3 episode(s) published in the window from 1 show(s) were collected" in method
+    assert "episode(s) are quoted in this brief" in method

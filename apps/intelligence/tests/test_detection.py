@@ -198,6 +198,8 @@ def test_nothing_is_called_when_there_is_nothing_to_connect(db):
 def test_a_cut_off_answer_is_asked_again_in_halves(corpus, monkeypatch):
     """9–14 Nov: the answer outgrew its ceiling and the run failed six days
     running. Now the batch is split; the half holding one item is not sent."""
+    # Newest-first order, so the halves are the ones this test reasons about.
+    monkeypatch.setattr(detection, "interleave_channels", lambda claims: claims)
     monkeypatch.setattr(detection, "MIN_SPLIT_CLAIMS", 1)
     transport = FakeTransport([cut_off(), respond(Detection(signals=[magnesium(corpus)]))])
 
@@ -211,6 +213,8 @@ def test_a_cut_off_answer_is_asked_again_in_halves(corpus, monkeypatch):
 
 def test_stopping_at_the_ceiling_counts_as_cut_off(corpus, monkeypatch):
     """13 Nov: 8,000 of 8,000 tokens and nothing parsed — the same failure."""
+    # Newest-first order, so the halves are the ones this test reasons about.
+    monkeypatch.setattr(detection, "interleave_channels", lambda claims: claims)
     monkeypatch.setattr(detection, "MIN_SPLIT_CLAIMS", 1)
     transport = FakeTransport([
         FakeResponse(parsed_output=None, stop_reason="max_tokens"),
@@ -406,3 +410,19 @@ def test_weekly_coverage_applies_both_thresholds_and_skips_duplicates(db, settin
 
     assert (rows[0]["relevant_transcribed"], rows[0]["sources"], rows[0]["covered"]) == (3, 2, True)
     assert (rows[1]["relevant_transcribed"], rows[1]["covered"]) == (1, False)
+
+
+def test_every_batch_takes_the_channels_in_turn():
+    """15 Nov: 809 podcast claims in the window and no approved story cited one;
+    newest-first let short social posts fill every daily batch."""
+    from types import SimpleNamespace
+
+    def claim(n, platform):
+        return SimpleNamespace(pk=n, content_item=SimpleNamespace(platform=platform))
+
+    claims = [claim(1, "tiktok"), claim(2, "tiktok"), claim(3, "tiktok"),
+              claim(4, "podcast"), claim(5, "youtube"), claim(6, "podcast")]
+
+    ordered = [c.pk for c in detection.interleave_channels(claims)]
+
+    assert ordered == [1, 4, 5, 2, 6, 3]

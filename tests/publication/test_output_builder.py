@@ -272,7 +272,7 @@ def test_the_opportunity_brief_drafts_from_approved_candidates(client, admin, re
         output = Output.objects.get(type=OutputType.PRODUCT_MEMO)
         version = output.versions.get()
     assert output.client_profile_version
-    assert any(s["heading"].startswith("Candidate 1: Spermidine") for s in version.body)
+    assert any(s["heading"].startswith("A1. Candidate 1: Spermidine") for s in version.body)
 
 
 # ── Regenerate and edit (Mark, 24 Oct) ──────────────────────────────────────

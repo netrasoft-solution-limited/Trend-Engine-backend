@@ -24,6 +24,7 @@ Then an operator reviews it (`edit`, `decide`). Approval here is not publication
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from django.db import transaction
@@ -163,8 +164,11 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
             f"Reject it first to draft a new one."
         )
 
+    # Sponsored and promotional claims are marketing, not independent
+    # evidence: the brief leaves them out, so the model must not argue from them.
     evidence = list(
-        SignalEvidence.objects.filter(signal=signal).select_related("claim__content_item__source")
+        SignalEvidence.objects.filter(signal=signal, claim__is_sponsored=False)
+        .select_related("claim__content_item__source")
     )
     observed = _observations(signal)
     if not evidence and not observed:
@@ -205,6 +209,7 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
         allowed_observation_ids={link.observation_id for link in observed},
         product_names=list(profile.assets.values_list("name", flat=True)),
     )
+    _require_status_fit(content, signal)
     model_run = (
         ModelRun.objects.filter(purpose=ModelRun.Purpose.DRAFTING, prompt_version=PROMPT_VERSION)
         .order_by("-at")
@@ -248,6 +253,47 @@ def declined_at_evidence(organization) -> dict[int, int]:
 
 def _observations(signal: Signal) -> list:
     return list(signal.observations.select_related("observation").order_by("added_at"))
+
+
+#: Words that call a development a rising trend. Only a measured rising trend
+#: may use them (Mark, 19 Oct; and 15 Nov: NMN and D3/K2 carried a
+#: "recurring discussion" status line beside narrative calling them rising).
+#: Narrow on purpose: "muscle growth" or "Google Trends" are not trend claims.
+TREND_WORDS = re.compile(
+    r"\b(?:rising|surging|booming|trending|skyrocketing|on the rise|uptick|momentum)\b"
+    r"|\b(?:growing|increasing|rising|accelerating|soaring)\s+"
+    r"(?:interest|demand|discussion|attention|popularity|conversation|search(?:es)?|buzz|"
+    r"adoption|awareness|curiosity|engagement)\b"
+    r"|\b(?:a|an|this|the)\s+(?:(?:rising|growing|emerging|new|clear|strong|measured)\s+)?"
+    r"trend\b(?!\s+brief)",
+    re.IGNORECASE,
+)
+
+
+def status_conflicts(content: dict, maturity: str) -> list[str]:
+    """Phrases in the prose that claim a trend the status does not support."""
+    if maturity == Signal.Maturity.MEASURED_TREND:
+        return []
+    texts = [content.get("why_it_matters") or "", content.get("limits") or ""]
+    texts += [a.get("action") or "" for a in content.get("actions") or []]
+    texts += [a.get("success_measure") or "" for a in content.get("actions") or []]
+    found = []
+    for text in texts:
+        for match in TREND_WORDS.finditer(text):
+            phrase = match.group(0).strip()
+            if phrase.lower() not in (f.lower() for f in found):
+                found.append(phrase)
+    return found
+
+
+def _require_status_fit(content: dict, signal: Signal) -> None:
+    conflicts = status_conflicts(content, signal.maturity)
+    if conflicts:
+        raise RecommendationError(
+            f"{signal.code} is a {signal.get_maturity_display().lower()}, not a measured "
+            f"rising trend, but the text says: {', '.join(repr(c) for c in conflicts)}. "
+            f"Describe it as a recurring discussion or something to watch."
+        )
 
 
 def validate(
@@ -422,6 +468,7 @@ def edit(recommendation: Recommendation, raw: dict, *, actor_label: str) -> Reco
             link.observation_id for link in _observations(recommendation.signal)
         },
     )
+    _require_status_fit(content, recommendation.signal)
     for field, value in content.items():
         setattr(recommendation, field, value)
     recommendation.validation = validation

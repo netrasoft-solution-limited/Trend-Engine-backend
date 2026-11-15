@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from django.utils import timezone
 
+from apps.enrichment import promotion
 from apps.outputs import briefing, content_brief, opportunity_brief
 from apps.outputs.models import OutputType
 from apps.outputs.services import DraftingError
@@ -24,6 +25,9 @@ class Generated:
 
 
 def generate(organization, type_: str, *, recommendation=None) -> Generated:
+    # One promotional classification for every output (Mark, 15 Nov): a mark
+    # made on an observation reaches the claims before anything is counted.
+    promotion.reclassify(actor_label="brief generation")
     if type_ == OutputType.CONTENT_BRIEF:
         if recommendation is None:
             raise DraftingError(

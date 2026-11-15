@@ -80,6 +80,48 @@ STATUS = {
 }
 
 
+def status_counts(signal: Signal) -> str:
+    """The measurement behind a status, with its periods (Mark, 15 Nov).
+
+    The current week is compared with the average of the four weeks before it,
+    counted in distinct independent items (promotional ones excluded), from the
+    last time the development was scored. Said for every status, so "measured
+    rising" is shown, not asserted, and a recurring discussion shows why it is
+    not one.
+    """
+    from datetime import timedelta
+
+    baseline = signal.baseline or {}
+    weekly = list(baseline.get("weekly_items") or [])
+    scored = signal.scored_at
+    if len(weekly) < 5 or scored is None:
+        return "No weekly measurement yet."
+    end = scored.date() if hasattr(scored, "date") else scored
+    current_from = end - timedelta(days=6)
+    base_from, base_to = end - timedelta(days=34), end - timedelta(days=7)
+    current, base = weekly[0], sum(weekly[1:5]) / 4
+    change = (
+        f"{(current - base) / base:+.0%}" if base else ("new this week" if current else "none")
+    )
+    streak = int(baseline.get("covered_streak") or 0)
+    text = (
+        f"Current week ({current_from:%-d %b}–{end:%-d %b}): {current} item(s). Baseline "
+        f"({base_from:%-d %b}–{base_to:%-d %b}): {base:.1f} a week, from "
+        f"{', '.join(str(n) for n in reversed(weekly[1:5]))} item(s) in its four weeks. "
+        f"Change: {change}."
+    )
+    if streak < 5 and signal.maturity != Signal.Maturity.MEASURED_TREND:
+        text += (
+            f" Not measured as a trend: {streak} of the 5 adequately covered weeks a "
+            f"baseline needs."
+        )
+    return text
+
+
+def status_sentence(signal: Signal) -> str:
+    return f"{STATUS.get(signal.maturity, STATUS[Signal.Maturity.WATCH])} {status_counts(signal)}"
+
+
 @dataclass
 class Development:
     signal: Signal
@@ -178,26 +220,154 @@ def sections_for_brief(organization, codes: list[str] | None = None) -> Brief:
             + (f" — {pending} recommendation(s) are waiting for review." if pending else ".")
         )
 
+    _refuse_status_conflicts(developments)
+
     profiles = {d.recommendation.profile.citation for d in developments if d.recommendation.profile}
     #: Every source cited, in first-cited order; the key says what kind it is.
     sources: OrderedDict[tuple, object] = OrderedDict()
 
     body = [_development(organization, d, sources) for d in developments]
+    leads = [section.pop("lead", []) for section in body]
     watched = _watched(organization, exclude={d.signal.pk for d in developments})
     watch = _watch_list(watched)
     family_map = _family_map(organization, developments, watched)
 
+    # Mark, 15 Nov: "a concise front section showing what changed, the
+    # strongest evidence, the Jarrow product or portfolio gap, and the
+    # recommended action. Keep detailed evidence in an appendix."
+    appendix = [
+        {
+            "heading": "Appendix A: Evidence by story",
+            "text": "Each story in full: its status and measurement, what changed, why it "
+            "matters, the recommended steps, what the evidence does not prove, and every "
+            "quoted source with its date.",
+        },
+        *[{**section, "heading": f"A{n}. {section['heading']}"}
+          for n, section in enumerate(body, start=1)],
+        *([{**family_map, "heading": "Appendix B: The full portfolio"}] if family_map else []),
+        {**_method(organization, developments, sources, profiles),
+         "heading": "Appendix C: Coverage and method"},
+        {**_sources(sources), "heading": "Appendix D: Sources"},
+    ]
     sections = [
         _about(organization, developments, sources),
-        _executive_summary(organization, developments, watched, sources),
-        *([family_map] if family_map else []),
-        *body,
+        _decision_summary(organization, developments, leads, watched, sources),
+        _what_changed(organization, developments),
         _next_steps(developments),
         *([watch] if watch else []),
-        _method(organization, developments, sources, profiles),
-        _sources(sources),
+        *appendix,
     ]
     return Brief(sections, ", ".join(sorted(profiles)), len(developments))
+
+
+def _refuse_status_conflicts(developments: list[Development]) -> None:
+    """A story's words must agree with its status (Mark, 15 Nov: NMN and D3/K2
+    had a recurring-discussion status and narrative calling them rising).
+    Checked against the status today, since rescoring can change it after the
+    text was approved."""
+    from apps.scoring.recommendations import status_conflicts
+
+    problems = []
+    for d in developments:
+        rec = d.recommendation
+        content = {
+            "why_it_matters": f"{rec.why_it_matters} {d.signal.statement}",
+            "limits": rec.limits,
+            "actions": rec.actions,
+        }
+        found = status_conflicts(content, d.signal.maturity)
+        if found:
+            problems.append(
+                f"{d.signal.code} ({d.signal.get_maturity_display().lower()}) says "
+                + ", ".join(repr(f) for f in found)
+            )
+    if problems:
+        raise DraftingError(
+            "Some approved text calls a development rising that is not measured as a "
+            "rising trend. Edit or redraft it, then generate again: " + "; ".join(problems) + "."
+        )
+
+
+def _decision_summary(organization, developments, leads, watched, sources) -> dict:
+    """One block per story: what changed, the best evidence, the product or
+    gap, the action. Everything here is approved text or a cited source."""
+    profile = client_services.current_for(organization)
+    listings = (
+        profile.assets.exclude(kind=ClientAsset.Kind.CATEGORY).count() if profile else 0
+    )
+    counts = [
+        f"{len(developments)} stor{'y' if len(developments) == 1 else 'ies'}"
+        + (f" plus {len(watched)} watch item{'s' if len(watched) != 1 else ''}" if watched else ""),
+        f"{listings} listings mapped" if listings else "",
+        f"{len(sources)} dated, linked sources",
+    ]
+    blocks = []
+    for n, (d, lead) in enumerate(zip(developments, leads, strict=True), start=1):
+        rec = d.recommendation
+        action = (
+            client_facing(rec.actions[0]["action"]) if rec.actions
+            else _first_sentence(client_facing(rec.why_it_matters))
+        )
+        products = ", ".join(rec.products) or "No current listing named; see Appendix A."
+        lines = [
+            f"{n}. {d.signal.title}",
+            f"· Status: {d.signal.get_maturity_display()}. {status_counts(d.signal)}",
+            f"· What changed: {_first_sentence(d.signal.statement)}",
+            f"· Strongest evidence: {lead[0] if lead else 'see Appendix A.'}",
+            f"· {organization.name} products: {products}",
+            f"· Recommended action: {action}",
+        ]
+        blocks.append("\n".join(lines))
+    return {
+        "heading": "Decision summary",
+        "text": f"{' · '.join(c for c in counts if c)}. Full evidence for each story is in "
+        f"Appendix A; sources are in Appendix D.\n\n" + "\n\n".join(blocks),
+    }
+
+
+#: Headings that are not stories, in this and earlier brief layouts.
+NOT_STORIES = {
+    "About this brief", "Executive summary", "Decision summary", "The full portfolio",
+    "Next 14 days", "Watch list", "Coverage and method", "Sources",
+    "What changed since the last brief",
+}
+
+
+def _previous_stories(organization) -> tuple[dict[str, str], str]:
+    """Story title → status line from the latest earlier trend brief, and its date."""
+    previous = (
+        Output.objects.filter(organization=organization, type=OutputType.TREND_BRIEF)
+        .order_by("-updated_at").first()
+    )
+    version = previous.versions.order_by("-number").first() if previous else None
+    if version is None:
+        return {}, ""
+    stories = {}
+    for section in version.body or []:
+        heading = re.sub(r"^A\d+\.\s+", "", section.get("heading") or "")
+        if heading in NOT_STORIES or heading.startswith("Appendix"):
+            continue
+        status = re.search(r"Status\. ([^:.]+)", section.get("text") or "")
+        stories[heading] = status.group(1).strip() if status else ""
+    return stories, f"{version.created_at:%-d %B %Y}"
+
+
+def _what_changed(organization, developments) -> dict:
+    before, when = _previous_stories(organization)
+    if not before:
+        return {"heading": "What changed since the last brief",
+                "text": "This is the first trend brief for this client."}
+    now = {d.signal.title: d.signal.get_maturity_display() for d in developments}
+    new = [t for t in now if t not in before]
+    dropped = [t for t in before if t not in now]
+    moved = [f"{t}: {before[t]} → {now[t]}" for t in now
+             if t in before and before[t] and before[t] != now[t]]
+    lines = [f"Compared with the brief of {when}:"]
+    lines.append("· New stories: " + ("; ".join(new) if new else "none") + ".")
+    lines.append("· Carried over: " + ("; ".join(t for t in now if t in before) or "none") + ".")
+    lines.append("· No longer featured: " + ("; ".join(dropped) if dropped else "none") + ".")
+    lines.append("· Status changes: " + ("; ".join(moved) if moved else "none") + ".")
+    return {"heading": "What changed since the last brief", "text": "\n".join(lines)}
 
 
 # ── Sections ────────────────────────────────────────────────────────────────
@@ -228,13 +398,37 @@ def is_older(item) -> bool:
     return bool(when) and when < timezone.localdate() - timedelta(days=WINDOW_DAYS)
 
 
+def window_start():
+    return research_window()[0]
+
+
+def observation_is_older(o) -> bool:
+    """Older than the window, judged by publication date when the brief is built.
+
+    The stored `is_old_material` flag is set when an observation is entered,
+    against the window of that day, and goes stale: 23 of 84 sources in the
+    15 Nov opportunity memo predated the window and several carried no label
+    (Mark, 15 Nov). The date decides; the flag can only add.
+    """
+    return bool(o.is_old_material or (o.published_at and o.published_at < window_start()))
+
+
+def observation_is_promotional(o) -> bool:
+    return bool(o.is_ad or o.is_brand_content)
+
+
+#: Hand-entered kinds that describe a product or a study, not a conversation:
+#: undated is normal for them and they are context, not corroboration.
+REFERENCE_TYPES = ("catalogue", "research")
+
+
 def _window(sources: OrderedDict) -> tuple:
     dates = []
     for (kind, _), obj in sources.items():
         if kind == "item":
             if not is_older(obj):
                 dates.append(_item_date(obj))
-        elif obj.published_at and not obj.is_old_material:
+        elif obj.published_at and not observation_is_older(obj):
             # The day something was checked is not when anyone said it, so an
             # undated product page or fact sheet never stretches the window, and
             # older material is background, not part of it.
@@ -303,45 +497,6 @@ REVIEW_STATUS = (
 )
 
 
-def _executive_summary(organization, developments, watched, sources) -> dict:
-    lead = developments[0]
-    profile = client_services.current_for(organization)
-    listings = (
-        profile.assets.exclude(kind=ClientAsset.Kind.CATEGORY).count() if profile else 0
-    )
-    families = (
-        profile.assets.exclude(family="").values("family").distinct().count() if profile else 0
-    )
-    counts = [
-        f"{listings} listings reviewed" if listings else "",
-        f"{families} listening families" if families else "",
-        f"{len(developments)} stor{'y' if len(developments) == 1 else 'ies'}"
-        + (f" plus {len(watched)} watch item{'s' if len(watched) != 1 else ''}" if watched else ""),
-        f"{len(sources)} dated, linked sources",
-    ]
-    stories = "\n".join(
-        ["| Story | Status | Recommended response |"]
-        + [
-            f"| {d.signal.title} | {d.signal.get_maturity_display()} | "
-            + _cell(_first_sentence(client_facing(d.recommendation.actions[0]["action"]))
-                    if d.recommendation.actions else _first_sentence(
-                        client_facing(d.recommendation.why_it_matters)))
-            + " |"
-            for d in developments
-        ]
-    )
-    return {
-        "heading": "Executive summary",
-        "text": (
-            f"Our recommendation. Lead with the first story, “{lead.signal.title}” "
-            f"({lead.signal.get_maturity_display().lower()}). "
-            f"{_first_sentence(client_facing(lead.recommendation.why_it_matters))}\n\n"
-            f"{' · '.join(c for c in counts if c)}.\n\n"
-            f"{stories}"
-        ),
-    }
-
-
 def _cell(text: str) -> str:
     """Text safe inside a table cell: one line, no column separators."""
     return " ".join(str(text).replace("|", "/").split())
@@ -401,7 +556,7 @@ def _development(organization, development: Development, sources) -> dict:
     supporting, dissent = _evidence(signal, sources)
 
     parts = [
-        f"Status. {STATUS.get(signal.maturity, STATUS[Signal.Maturity.WATCH])}",
+        f"Status. {status_sentence(signal)}",
         f"What changed. {signal.statement}",
     ]
     parts.append(f"Why it matters to {organization.name}. {client_facing(rec.why_it_matters)}")
@@ -414,20 +569,31 @@ def _development(organization, development: Development, sources) -> dict:
     if rec.limits:
         parts.append(f"What this does not prove. {client_facing(rec.limits)}")
     parts.append(_strength(signal))
+    brand = []
     for link in signal.observations.select_related("observation").order_by("added_at"):
         line = observation_line(link.observation, sources)
-        (dissent if link.role == SignalEvidence.Role.CONTRADICTS else supporting).append(line)
+        if observation_is_promotional(link.observation):
+            # Competitor and brand marketing: worth knowing, never evidence of
+            # independent interest (Mark, 15 Nov).
+            brand.append(line)
+        else:
+            (dissent if link.role == SignalEvidence.Role.CONTRADICTS else supporting).append(line)
     if supporting:
         parts.append("The evidence:\n" + "\n".join(f"· {line}" for line in supporting))
     if dissent:
         parts.append(
             "Where sources disagree:\n" + "\n".join(f"· {line}" for line in dissent)
         )
+    if brand:
+        parts.append(
+            "Brand and competitor activity (not counted as independent evidence):\n"
+            + "\n".join(f"· {line}" for line in brand)
+        )
     ai = benchmark.brief_lines(organization, rec.benchmark_questions)
     if ai:
         parts.append("What AI answers show today:\n" + "\n".join(f"· {line}" for line in ai))
     parts.extend(_content_plan(rec))
-    return {"heading": signal.title, "text": "\n\n".join(parts)}
+    return {"heading": signal.title, "text": "\n\n".join(parts), "lead": supporting[:1]}
 
 
 #: The content package's pieces, by section heading prefix, as the brief names them.
@@ -543,6 +709,7 @@ def _method(organization, developments, sources: OrderedDict, profiles: set[str]
                 "No automatically collected item is cited in this brief: its stories were "
                 "started by an analyst from the examples below.\n\n"
             )
+            + f"{podcast_coverage(items)}\n\n"
             + f"{coverage_gaps(items)}\n\n"
             + f"Entered by hand, with their links, dates and labels: {observed_line}. "
             f"These are targeted examples, not a representative sample. Figures keep "
@@ -567,6 +734,44 @@ def _by_platform(items) -> str:
     return ", ".join(f"{n} {labels.get(p, p)}" for p, n in counts.items() if n)
 
 
+def podcast_coverage(cited_items) -> str:
+    """What podcast collection found in the window and what of it this brief
+    uses, from the records (Mark, 15 Nov: show that fresh podcast collection
+    feeds detection and the briefs, or report honestly that it did not)."""
+    from django.db.models import Count
+
+    start, end = research_window()
+    episodes = ContentItem.objects.filter(
+        source__route="podcast", published_at__date__gte=start, published_at__date__lte=end
+    )
+    total = episodes.count()
+    if not total:
+        return ("Podcasts: no episode published in the window was collected from the "
+                "podcast sources followed.")
+    shows = episodes.values("source").distinct().count()
+    relevant = episodes.filter(gate_decision="relevant").count()
+    transcribed = episodes.filter(content_state="transcribed").count()
+    claims = Claim.objects.filter(content_item__in=episodes)
+    sponsored = claims.filter(is_sponsored=True).count()
+    in_signals = (
+        claims.filter(is_sponsored=False, signal_evidence__isnull=False)
+        .aggregate(n=Count("content_item", distinct=True))["n"]
+    )
+    cited = [i for i in cited_items if i.platform == "podcast"]
+    used = (
+        f"{len(cited)} episode(s) are quoted in this brief."
+        if cited else
+        "None is quoted in this brief: no approved story drew on a current podcast claim."
+    )
+    return (
+        f"Podcasts: {total} episode(s) published in the window from {shows} show(s) were "
+        f"collected; {relevant} passed the relevance check and {transcribed} were transcribed. "
+        f"They produced {claims.count()} claim(s), of which {sponsored} came from sponsor "
+        f"reads or promotion and are excluded; claims from {in_signals} episode(s) were "
+        f"grouped into developments. {used}"
+    )
+
+
 def coverage_gaps(items) -> str:
     """What this brief cannot see, stated rather than left to be inferred."""
     present = {item.platform for item in items}
@@ -585,10 +790,18 @@ def coverage_gaps(items) -> str:
                      "is not transcribed.")
     if "reddit" in present:
         lines.append("Reddit's public feed carries no score or comment count, so none is shown.")
-    lines.append("Monthly search volumes are unavailable (no keyword-tool data); search "
-                 "interest, where shown, is Google Trends relative interest. TikTok Shop sales "
-                 "are not collected.")
+    lines.append(SEARCH_LIMITS)
     return " ".join(lines)
+
+
+#: Said wherever a brief describes what search evidence it can and cannot have.
+SEARCH_LIMITS = (
+    "Monthly keyword volumes need a paid keyword tool, which is not in use; any volume "
+    "estimate shown keeps the date it was retrieved and is not fresh research. Google Trends "
+    "has no official API and refuses automated requests from our server, so Trends readings "
+    "come from Google's own export, with the exact periods compared. TikTok Shop sales are "
+    "not collected."
+)
 
 
 def _approvals(organization, developments, profiles) -> str:
@@ -615,7 +828,11 @@ def _sources(sources: OrderedDict) -> dict:
         if kind == "item":
             lines.append(f"· [{n}] {_source_line(obj)}")
         else:
-            note = "; ".join(p for p in [", ".join(obj.labels), own_words(obj.limitations)] if p)
+            labels = list(obj.labels)
+            if (obj.published_at and obj.published_at < window_start()
+                    and not obj.is_old_material and obj.source_type not in REFERENCE_TYPES):
+                labels.append("older material")
+            note = "; ".join(p for p in [", ".join(labels), own_words(obj.limitations)] if p)
             lines.append(
                 f"· [{n}] "
                 + (f"{obj.published_at:%-d %b %Y}" if obj.published_at
@@ -644,18 +861,30 @@ def _evidence(signal: Signal, sources: OrderedDict) -> tuple[list[str], list[str
         .select_related("claim__segment", "claim__content_item__source")
         .order_by("-claim__is_cited", "-claim__content_item__published_at", "claim_id")
     )
-    supporting, dissent, seen_items = [], [], set()
-    for row in rows:
-        claim = row.claim
-        if row.role == SignalEvidence.Role.CONTRADICTS:
-            if len(dissent) < DISSENT_PER_DEVELOPMENT:
-                dissent.append(quote_line(claim, sources))
-            continue
-        # One quote per item first, so five quotes are five voices where possible.
-        if claim.content_item_id in seen_items or len(supporting) >= EVIDENCE_PER_DEVELOPMENT:
+    dissent = [
+        quote_line(row.claim, sources)
+        for row in rows if row.role == SignalEvidence.Role.CONTRADICTS
+    ][:DISSENT_PER_DEVELOPMENT]
+    backing = [row.claim for row in rows if row.role != SignalEvidence.Role.CONTRADICTS]
+    # Current material before older; then one quote per channel before a second
+    # from any, so a podcast is not crowded out by five newer TikToks (Mark,
+    # 15 Nov); and one quote per item, so five quotes are five voices.
+    backing.sort(key=lambda c: is_older(c.content_item))
+    chosen, seen_items, seen_channels = [], set(), set()
+    for claim in backing:
+        channel = claim.content_item.platform
+        if claim.content_item_id in seen_items or channel in seen_channels:
             continue
         seen_items.add(claim.content_item_id)
-        supporting.append(quote_line(claim, sources))
+        seen_channels.add(channel)
+        chosen.append(claim)
+    for claim in backing:
+        if len(chosen) >= EVIDENCE_PER_DEVELOPMENT:
+            break
+        if claim.content_item_id not in seen_items:
+            seen_items.add(claim.content_item_id)
+            chosen.append(claim)
+    supporting = [quote_line(c, sources) for c in chosen[:EVIDENCE_PER_DEVELOPMENT]]
     return supporting, dissent
 
 
@@ -734,8 +963,14 @@ def observation_line(o, sources: OrderedDict | None = None) -> str:
         if o.query:
             line += f"; query “{o.query}”, {o.provider}, {o.geography}, {o.period}"
         line += ")."
-    if o.labels:
-        line += f" Labelled: {', '.join(o.labels)}."
+    labels = list(o.labels)
+    if (
+        o.published_at and o.published_at < window_start() and not o.is_old_material
+        and o.source_type not in REFERENCE_TYPES
+    ):
+        labels.append(f"older material (published before {window_start():%-d %b %Y})")
+    if labels:
+        line += f" Labelled: {', '.join(labels)}."
     if o.limitations:
         line += f" {own_words(o.limitations).rstrip('.')}."
     if sources is not None:
