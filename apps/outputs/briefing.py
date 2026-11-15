@@ -333,13 +333,21 @@ NOT_STORIES = {
 }
 
 
-def _previous_stories(organization) -> tuple[dict[str, str], str]:
-    """Story title → status line from the latest earlier trend brief, and its date."""
-    previous = (
-        Output.objects.filter(organization=organization, type=OutputType.TREND_BRIEF)
-        .order_by("-updated_at").first()
+def last_sent_version(organization, type_):
+    """The newest version of this kind that was rendered and sent out: the one
+    the reader has, so "what changed" is measured against it."""
+    from .models import OutputVersion
+
+    return (
+        OutputVersion.objects.filter(
+            organization=organization, output__type=type_, exports__isnull=False
+        ).order_by("-created_at").first()
     )
-    version = previous.versions.order_by("-number").first() if previous else None
+
+
+def _previous_stories(organization) -> tuple[dict[str, str], str]:
+    """Story title → status line from the last trend brief sent, and when."""
+    version = last_sent_version(organization, OutputType.TREND_BRIEF)
     if version is None:
         return {}, ""
     stories = {}
@@ -349,7 +357,7 @@ def _previous_stories(organization) -> tuple[dict[str, str], str]:
             continue
         status = re.search(r"Status\. ([^:.]+)", section.get("text") or "")
         stories[heading] = status.group(1).strip() if status else ""
-    return stories, f"{version.created_at:%-d %B %Y}"
+    return stories, f"{version.created_at:%-d %B %Y, %H:%M} UTC"
 
 
 def _what_changed(organization, developments) -> dict:
@@ -362,7 +370,7 @@ def _what_changed(organization, developments) -> dict:
     dropped = [t for t in before if t not in now]
     moved = [f"{t}: {before[t]} → {now[t]}" for t in now
              if t in before and before[t] and before[t] != now[t]]
-    lines = [f"Compared with the brief of {when}:"]
+    lines = [f"Compared with the brief last sent for review ({when}):"]
     lines.append("· New stories: " + ("; ".join(new) if new else "none") + ".")
     lines.append("· Carried over: " + ("; ".join(t for t in now if t in before) or "none") + ".")
     lines.append("· No longer featured: " + ("; ".join(dropped) if dropped else "none") + ".")

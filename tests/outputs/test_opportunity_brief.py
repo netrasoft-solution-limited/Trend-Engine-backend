@@ -87,7 +87,7 @@ def test_the_brief_has_the_delivered_sections_in_priority_order(jarrow):
     assert "not a launch recommendation" in summary
     assert "| Spermidine | spermidine | 14,800 | US |" in text["Appendix C: Search demand"]
     assert "must not be added together" in text["Appendix C: Search demand"]
-    assert "retrieved 20 Oct 2026, not refreshed" in text["Appendix C: Search demand"]
+    assert "retrieved 20 Oct 2026; not refreshed" in text["Appendix C: Search demand"]
     corroborated = text["Appendix B: What is corroborated across channels"]
     assert (
         "| Spermidine | None current | 1 independent current event(s); 1 paid, brand, older or "

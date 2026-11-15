@@ -26,6 +26,7 @@ from .briefing import (
     _cite,
     _first_sentence,
     _sources,
+    last_sent_version,
     observation_is_older,
     observation_is_promotional,
     observation_line,
@@ -300,13 +301,9 @@ def _strongest(c: Candidate) -> Observation | None:
 
 def _what_changed(organization, candidates) -> dict:
     """Against the previous memo: new current evidence and status changes."""
-    from apps.outputs.models import Output, OutputType
+    from apps.outputs.models import OutputType
 
-    previous = (
-        Output.objects.filter(organization=organization, type=OutputType.PRODUCT_MEMO)
-        .order_by("-updated_at").first()
-    )
-    version = previous.versions.order_by("-number").first() if previous else None
+    version = last_sent_version(organization, OutputType.PRODUCT_MEMO)
     if version is None:
         return {"heading": "What changed since the last memo",
                 "text": "This is the first opportunity memo for this client."}
@@ -316,7 +313,7 @@ def _what_changed(organization, candidates) -> dict:
         found = re.match(r"(?:A\d+\. )?Candidate \d+: (.+?) — (.+)$", section.get("heading") or "")
         if found:
             before[found.group(1)] = found.group(2)
-    lines = [f"Compared with the memo of {since:%-d %B %Y, %H:%M} UTC:"]
+    lines = [f"Compared with the memo last sent for review ({since:%-d %B %Y, %H:%M} UTC):"]
     for c in candidates:
         added = [o for o in c.observations.all() if o.entered_at > since]
         fresh = [o for o in added if evidence_class(o) in (CURRENT, SEARCH)]
@@ -378,8 +375,10 @@ def _search_demand(candidates, sources) -> dict:
                 n = list(sources).index(("obs", o.pk)) + 1
                 rows.append(
                     f"| {_cell(c.name)} | {_cell(o.query)} | {_cell(_figure(o))} | "
-                    f"{_cell(o.geography)} | {_cell(o.provider)}, {_cell(o.period)}; "
-                    f"retrieved {o.observed_at:%-d %b %Y}, not refreshed [{n}] |"
+                    f"{_cell(o.geography)} | {_cell(o.provider)}, {_cell(o.period)}"
+                    + ("" if "retrieved" in o.period.lower()
+                       else f"; retrieved {o.observed_at:%-d %b %Y}")
+                    + f"; not refreshed [{n}] |"
                 )
             elif o.metric_kind == Observation.MetricKind.TRENDS:
                 state = (
