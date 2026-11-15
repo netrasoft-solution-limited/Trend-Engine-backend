@@ -1,10 +1,11 @@
 """Run signal detection now, rather than waiting for the schedule.
 
-    manage.py detect_signals            detect and score
+    manage.py detect_signals            detect over the newest claims, and score
+    manage.py detect_signals --all      walk the whole window (a catch-up)
     manage.py detect_signals --rescore  rescore open signals only; no model call
 
-Detection makes one cost-capped model call over the window's claims; the
-summary printed is the same one the scheduled task returns.
+Detection makes one cost-capped model call per batch of claims; the summary
+printed is the same one the scheduled task returns.
 """
 from __future__ import annotations
 
@@ -23,6 +24,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Recompute scores for open signals without calling the model.",
         )
+        parser.add_argument(
+            "--all",
+            action="store_true",
+            help="Read every batch in the window, not only the newest (a catch-up).",
+        )
 
     def handle(self, *args, **options) -> None:
         if options["rescore"]:
@@ -30,7 +36,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Rescored {count} open signal(s)."))
             return
 
-        result = detection.detect()
+        result = detection.detect(batches=None) if options["all"] else detection.detect()
         if result.skipped:
             self.stdout.write(self.style.WARNING(f"Skipped: {result.skipped}"))
         self.stdout.write(
@@ -44,5 +50,9 @@ class Command(BaseCommand):
                     f"Dropped {result.dropped_unknown_ids} invented claim ID(s) and "
                     f"{result.dropped_single_source} single-item proposal(s)."
                 )
+            )
+        if result.failed:
+            self.stdout.write(
+                self.style.ERROR(f"{result.failed_batches} batch(es) failed: {result.errors[-1]}")
             )
         self.stdout.write(self.style.SUCCESS(f"Rescored {result.rescored} open signal(s)."))

@@ -330,3 +330,19 @@ def test_a_rejected_recommendation_is_not_redrafted_every_morning(jarrow, propos
 
     assert outcome == {"drafted": [], "declined": [], "failed": []}
     assert transport.calls == []
+
+
+def test_a_declined_signal_is_not_asked_again_until_its_evidence_changes(jarrow, evidence):
+    """SIG-3057 was declined, and paid for, every morning from 3 to 14 Nov."""
+    signal, claims = evidence
+    draft(jarrow, signal, decline_reason="Nothing here Jarrow can act on.")
+
+    with scoped(jarrow):
+        llm, transport = proposing(decline_reason="unused")
+        assert recommend_top(jarrow, client=llm)["declined"] == []
+        assert transport.calls == []
+
+        SignalEvidence.objects.filter(signal=signal, claim=claims["doubt"]).delete()
+        llm, transport = proposing(decline_reason="Still nothing.")
+        assert recommend_top(jarrow, client=llm)["declined"] == [signal.code]
+        assert len(transport.calls) == 1

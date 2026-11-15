@@ -33,16 +33,21 @@ def recommend_top(organization, *, limit: int = RECOMMEND_TOP, client=None) -> d
 
     "Never", not "no open one": a signal whose recommendation an operator
     rejected is not redrafted automatically — that would put the rejected
-    advice back in the queue every morning. Scoped by the caller.
+    advice back in the queue every morning. Nor is one the model declined,
+    until new evidence attaches to it. Scoped by the caller.
     """
     have = set(
         Recommendation.objects.filter(organization=organization).values_list("signal_id", flat=True)
     )
+    declined_before = recommendations.declined_at_evidence(organization)
     drafted, declined, failed = [], [], []
     for signal in ranked_open(organization):
         if len(drafted) + len(declined) >= limit:
             break
         if signal.pk in have:
+            continue
+        # Declined already, on the same evidence: the answer would be the same.
+        if declined_before.get(signal.pk) == recommendations.evidence_count(signal):
             continue
         try:
             result = recommendations.draft(organization, signal, client=client)

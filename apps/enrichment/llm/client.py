@@ -94,6 +94,13 @@ def extraction_tier() -> Tier:
     return _tier("extraction", "claude-sonnet-5-5", 8000)
 
 
+def detection_tier() -> Tier:
+    # Grouping a batch of claims into developments writes one statement and
+    # two ID lists per development. Under the extraction ceiling the answer
+    # outgrew 8,000 tokens and was cut off every day from 9 to 14 Nov.
+    return _tier("detection", "claude-sonnet-5-5", 20000)
+
+
 def recommendation_tier() -> Tier:
     # Client-facing judgement, so the strong model (Arch §10.3) — but a short
     # answer: why it matters and up to four actions. The low ceiling is also
@@ -253,11 +260,25 @@ class LLMClient:
 
         parsed = getattr(response, "parsed_output", None)
         if parsed is None:
+            # Stopping at the ceiling with nothing parsed is a cut-off answer,
+            # not a malformed one (detection, 13 Nov: 8,000 of 8,000 tokens).
+            # Saying so lets a caller that can split its input do that.
+            truncated = getattr(response, "stop_reason", None) == "max_tokens"
             self._record(
                 purpose=purpose, outcome=ModelRun.Outcome.INVALID, tier=tier,
                 prompt_version=prompt_version, content_item=content_item,
-                latency_ms=latency_ms, error="No parsed output on the response", **tokens,
+                latency_ms=latency_ms,
+                error=(
+                    f"{CUT_OFF} at the {tier.max_output_tokens:,}-token ceiling"
+                    if truncated else "No parsed output on the response"
+                ),
+                **tokens,
             )
+            if truncated:
+                raise LLMTruncated(
+                    f"{purpose}: the answer was cut off at the "
+                    f"{tier.max_output_tokens:,}-token ceiling."
+                )
             raise LLMInvalidOutput(f"{purpose}: response carried no schema-valid output.")
 
         _warn_if_cache_is_a_no_op(purpose, system, tokens)

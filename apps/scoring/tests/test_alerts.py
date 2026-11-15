@@ -61,3 +61,49 @@ def test_the_banner_shows_on_operator_pages(client, podcast):  # noqa: F811
     page = client.get(reverse("ops-observations")).content.decode()
 
     assert f"Collection from {podcast.name} is failing" in page
+
+
+# ── Detection (9–14 Nov: six failed days nobody saw) ────────────────────────
+
+
+def detection_run(failed, error="detection: the answer was cut off after 512 characters."):
+    from types import SimpleNamespace
+
+    from apps.intelligence import health
+
+    return health.record(SimpleNamespace(
+        failed=failed, failed_batches=int(failed), errors=[error] if failed else [],
+        claims_considered=400, created=[], extended=[],
+    ))
+
+
+def test_failing_detection_is_on_the_banner_until_a_run_works(db):
+    detection_run(False)
+    detection_run(True)
+    detection_run(True)
+
+    [problem] = problems()
+
+    assert problem["what"] == "Signal detection is failing"
+    assert problem["why"] == "the AI answer was cut off part-way"
+    assert problem["count"] == 2
+
+    detection_run(False)
+    assert problems() == []
+
+
+def test_the_review_address_is_emailed_once_per_streak(db, settings, mailoutbox):
+    from apps.intelligence import health
+
+    settings.OUTPUT_REVIEW_RECIPIENTS = ["mark@omnialta.com"]
+    detection_run(True)
+    assert not health.alert_if_failing(), "one bad morning is a banner, not an email"
+    detection_run(True)
+    assert health.alert_if_failing()
+    detection_run(True)
+    assert not health.alert_if_failing(), "a long outage is one message"
+
+    [message] = mailoutbox
+    assert message.to == ["mark@omnialta.com"]
+    assert "Signal detection is failing" in message.subject
+    assert "cut off" in message.body

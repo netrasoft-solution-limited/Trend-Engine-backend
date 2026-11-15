@@ -10,6 +10,7 @@ from __future__ import annotations
 from apps.enrichment import failures
 from apps.enrichment.models import ModelRun
 from apps.ingestion.models import IngestionRun
+from apps.intelligence import health
 from apps.sources.models import Source
 
 #: Vendor errors an operator should read in plain words.
@@ -18,6 +19,7 @@ PLAIN = (
     ("build-not-found", "the collector build no longer exists"),
     ("invalid x-api-key", "the API key was rejected"),
     ("cut off before it finished", "the AI answer was cut off part-way"),
+    ("answer was cut off", "the AI answer was cut off part-way"),
     ("401", "the provider rejected our credentials"),
 )
 
@@ -58,6 +60,18 @@ def problems() -> list[dict]:
             "why": _plain(latest.error or ""),
             "since": failing.order_by("at").first().at,
             "count": failing.filter(outcome=ModelRun.Outcome.ERRORED).count(),
+        })
+
+    # Collection can run for days while detection fails, and the research
+    # collected is never connected into signals (9–14 Nov).
+    streak = health.failing_streak()
+    if streak:
+        found.append({
+            "what": "Signal detection is failing",
+            "why": _plain(health.last_error(streak)),
+            "since": streak[-1].at,
+            "count": len(streak),
+            "unit": "run",
         })
 
     stuck = list(failures.unanalysed()[:50])

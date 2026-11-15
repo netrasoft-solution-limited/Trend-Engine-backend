@@ -185,6 +185,18 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
 
     if proposed.decline_reason.strip() and not proposed.actions:
         logger.info("%s declined for %s: %s", signal.code, organization, proposed.decline_reason)
+        # Recorded so the daily run does not ask the same question again
+        # tomorrow (SIG-3057 was declined, and paid for, every morning).
+        _audit(
+            organization,
+            "system",
+            f"Declined to recommend on {signal.code}",
+            {
+                "declined_signal_id": signal.pk,
+                "evidence": evidence_count(signal),
+                "reason": proposed.decline_reason.strip()[:1000],
+            },
+        )
         return Drafted(None, declined=proposed.decline_reason.strip())
 
     content, validation = validate(
@@ -215,6 +227,23 @@ def draft(organization, signal: Signal, *, client: LLMClient | None = None) -> D
             {"recommendation_id": recommendation.pk, "validation": validation},
         )
     return Drafted(recommendation)
+
+
+def evidence_count(signal: Signal) -> int:
+    """Claims and observations behind a signal; a decline stands until it changes."""
+    return SignalEvidence.objects.filter(signal=signal).count() + signal.observations.count()
+
+
+def declined_at_evidence(organization) -> dict[int, int]:
+    """Signal id → the evidence count at its latest decline for this client."""
+    found: dict[int, int] = {}
+    for context in (
+        AuditEvent.objects.filter(organization=organization, context__has_key="declined_signal_id")
+        .order_by("at")
+        .values_list("context", flat=True)
+    ):
+        found[context["declined_signal_id"]] = context.get("evidence", 0)
+    return found
 
 
 def _observations(signal: Signal) -> list:

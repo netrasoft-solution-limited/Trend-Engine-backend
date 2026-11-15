@@ -21,9 +21,10 @@ WHAT IS NEVER TRUSTED FROM THE MODEL:
   · extending a signal code that is not open — becomes a new signal
 The model's job ends at grouping and wording. Every score is computed here.
 
-One call per run, over the whole window, because grouping is a comparison
-across items: it cannot be done one item at a time. The call is cost-capped by
-the client like every other.
+Grouping is a comparison across items, so it cannot be done one item at a
+time; it is done in batches of claims, newest first, each batch seeing the
+signals the batches before it opened. A batch whose answer is cut off is asked
+again in halves. Every call is cost-capped by the client like every other.
 """
 from __future__ import annotations
 
@@ -43,15 +44,16 @@ from apps.enrichment.domain import DOMAIN_PACK_VERSION, domain_pack
 from apps.enrichment.llm.client import (
     LLMClient,
     LLMInvalidOutput,
+    LLMTruncated,
     LLMUnavailable,
     cached_system,
-    extraction_tier,
+    detection_tier,
 )
 from apps.enrichment.llm.costs import CostCapExceeded
 from apps.enrichment.models import Claim, ModelRun
 from apps.evidence.models import ContentItem
 
-from . import components
+from . import components, health
 from .models import Signal, SignalEvidence
 
 logger = logging.getLogger(__name__)
@@ -62,10 +64,17 @@ PROMPT_VERSION = "detection/2026-10-12"
 #: development's history is in view when it is detected.
 WINDOW_DAYS = 35
 
-#: The most claims one call is given, newest first. Bounds the cost of a run
-#: whatever the corpus grows to; at roughly 60 tokens a claim this is well
-#: inside one call's budget.
-MAX_CLAIMS = 400
+#: The most claims one call is given, newest first. At 400 the answer outgrew
+#: its ceiling and was cut off six days running (9–14 Nov); at 150 a full
+#: answer is a fraction of it.
+MAX_CLAIMS = 150
+
+#: Batches the daily run reads: the newest ~450 claims, about what one call
+#: read before 15 Nov. A catch-up walks the whole window instead.
+DAILY_BATCHES = 3
+
+#: Below this a cut-off batch is not split again; the failure is reported.
+MIN_SPLIT_CLAIMS = 40
 
 #: Signals that new evidence may still be attached to.
 OPEN_STATES = (
@@ -145,6 +154,15 @@ class DetectionResult:
     reused: list[str] = field(default_factory=list)
     rescored: int = 0
     skipped: str = ""
+    #: Batches whose call failed even after splitting, and why. A failure no
+    #: longer ends the run: the next batch is still read.
+    failed_batches: int = 0
+    errors: list[str] = field(default_factory=list)
+    calls: int = 0
+
+    @property
+    def failed(self) -> bool:
+        return self.failed_batches > 0
 
 
 def evidence_date():
@@ -164,56 +182,86 @@ def window_claims(now: datetime, *, batch: int = 0) -> list[Claim]:
 
 
 def detect(
-    *, client: LLMClient | None = None, now: datetime | None = None, batches: int = 1
+    *,
+    client: LLMClient | None = None,
+    now: datetime | None = None,
+    batches: int | None = DAILY_BATCHES,
 ) -> DetectionResult:
     """Detect developments in the current window, persist them, and score them.
 
-    The daily run reads the newest `MAX_CLAIMS`. A catch-up after a large
-    collection (the first Reddit, TikTok and Instagram passes added ~1,900
-    claims on 1 Nov) passes `batches` to read further back, one call per batch,
-    each seeing the signals the previous one opened.
+    The daily run reads the newest `DAILY_BATCHES` batches. A catch-up after a
+    large collection or a run of failures passes `batches=None` to walk the
+    whole window, one call per batch, each seeing the signals the previous
+    one opened.
     """
     now = now or timezone.now()
     result = DetectionResult()
-    for batch in range(max(batches, 1)):
+    llm = client or LLMClient()
+    batch = 0
+    while batches is None or batch < max(batches, 1):
         claims = window_claims(now, batch=batch)
         if not claims:
             break
-        _detect_batch(claims, client=client, now=now, result=result)
-        if result.skipped:
+        result.claims_considered += len(claims)
+        try:
+            _detect_batch(claims, llm=llm, now=now, result=result)
+        except CostCapExceeded as exc:
+            # Every later batch would be refused the same way.
+            _failed(result, exc)
             break
+        except (LLMUnavailable, LLMInvalidOutput) as exc:
+            _failed(result, exc)
+        batch += 1
+    if result.failed:
+        result.skipped = f"{result.failed_batches} batch(es) failed: {result.errors[-1]}"
+    elif result.claims_considered and not result.calls:
+        result.skipped = "fewer than two items with claims in the window"
     result.rescored = rescore_open(now=now)
+    health.record(result)
     return result
 
 
-def _detect_batch(claims, *, client, now, result) -> None:
-    result.claims_considered += len(claims)
+def _failed(result: DetectionResult, exc: Exception) -> None:
+    logger.warning("Signal detection failed: %s", exc)
+    result.failed_batches += 1
+    result.errors.append(str(exc))
+
+
+def _detect_batch(claims, *, llm, now, result) -> None:
+    """Ask about one batch and apply the answer; a cut-off answer is asked
+    again in halves, the second half seeing what the first one opened."""
     if len({_conversation(c) for c in claims}) < 2:
-        result.skipped = "fewer than two items with claims in the window"
         return
 
     open_signals = {
         s.code: s
         for s in Signal.objects.filter(state__in=OPEN_STATES, is_illustrative=False)
     }
-    llm = client or LLMClient()
+    result.calls += 1
     try:
         detection = llm.structured(
             schema=Detection,
-            tier=extraction_tier(),
+            tier=detection_tier(),
             purpose=ModelRun.Purpose.DETECTION,
             prompt_version=PROMPT_VERSION,
             system=cached_system(f"{INSTRUCTIONS}\n\n## The domain\n\n{domain_pack()}"),
             user=_render(claims, open_signals.values()),
         )
-    except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
-        logger.warning("Signal detection failed: %s", exc)
-        result.skipped = str(exc)
+    except LLMTruncated:
+        if len(claims) < 2 * MIN_SPLIT_CLAIMS:
+            raise
+        half = len(claims) // 2
+        _detect_batch(claims[:half], llm=llm, now=now, result=result)
+        _detect_batch(claims[half:], llm=llm, now=now, result=result)
         return
 
-    # `structured` returns the parsed answer, not its ledger row; detection is
-    # a single scheduled call, so the newest detection run IS this one.
-    model_run = ModelRun.objects.filter(purpose=ModelRun.Purpose.DETECTION).order_by("-at").first()
+    # `structured` returns the parsed answer, not its ledger row; calls are
+    # made one at a time, so the newest successful detection run IS this one.
+    model_run = (
+        ModelRun.objects.filter(
+            purpose=ModelRun.Purpose.DETECTION, outcome=ModelRun.Outcome.SUCCEEDED
+        ).order_by("-at").first()
+    )
 
     by_id = {c.pk: c for c in claims}
     with transaction.atomic():

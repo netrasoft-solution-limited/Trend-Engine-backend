@@ -11,12 +11,13 @@ from dataclasses import asdict
 
 from celery import current_app, shared_task
 
-from . import detection
+from . import detection, health
 
 
 @shared_task(name="apps.intelligence.tasks.detect_signals")
 def detect_signals() -> dict:
     result = asdict(detection.detect())
+    health.alert_if_failing()
     # Per-client ranking is L5 and this is L4, so it is dispatched by NAME —
     # the same decoupling `apps.evidence` uses to hand items to the gate.
     current_app.send_task("apps.scoring.tasks.rank_all_clients", queue="enrich")

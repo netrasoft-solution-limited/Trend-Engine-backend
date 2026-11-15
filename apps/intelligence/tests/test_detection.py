@@ -15,7 +15,7 @@ from django.utils import timezone
 from apps.enrichment.domain import DOMAIN_PACK_VERSION
 from apps.enrichment.llm.client import LLMClient
 from apps.enrichment.models import Claim, ModelRun
-from apps.enrichment.tests.fakes import FakeTransport, respond
+from apps.enrichment.tests.fakes import FakeResponse, FakeTransport, cut_off, respond
 from apps.evidence.models import ContentItem, ContentSegment
 from apps.intelligence import detection
 from apps.intelligence.detection import DetectedSignal, Detection
@@ -190,6 +190,58 @@ def test_nothing_is_called_when_there_is_nothing_to_connect(db):
 
     assert result.skipped
     assert transport.calls == [], "one item cannot hold a cross-source development"
+
+
+# ── A long answer is not a lost day ─────────────────────────────────────────
+
+
+def test_a_cut_off_answer_is_asked_again_in_halves(corpus, monkeypatch):
+    """9–14 Nov: the answer outgrew its ceiling and the run failed six days
+    running. Now the batch is split; the half holding one item is not sent."""
+    monkeypatch.setattr(detection, "MIN_SPLIT_CLAIMS", 1)
+    transport = FakeTransport([cut_off(), respond(Detection(signals=[magnesium(corpus)]))])
+
+    result = detection.detect(client=LLMClient(transport=transport))
+
+    assert len(transport.calls) == 2
+    assert len(result.created) == 1 and not result.failed and not result.skipped
+    outcomes = list(ModelRun.objects.order_by("at").values_list("outcome", flat=True))
+    assert outcomes == ["invalid", "succeeded"]
+
+
+def test_stopping_at_the_ceiling_counts_as_cut_off(corpus, monkeypatch):
+    """13 Nov: 8,000 of 8,000 tokens and nothing parsed — the same failure."""
+    monkeypatch.setattr(detection, "MIN_SPLIT_CLAIMS", 1)
+    transport = FakeTransport([
+        FakeResponse(parsed_output=None, stop_reason="max_tokens"),
+        respond(Detection(signals=[magnesium(corpus)])),
+    ])
+
+    result = detection.detect(client=LLMClient(transport=transport))
+
+    assert len(result.created) == 1
+    assert "cut off" in ModelRun.objects.order_by("at").first().error
+
+
+def test_a_failed_batch_is_reported_and_the_next_one_is_still_read(corpus, monkeypatch):
+    monkeypatch.setattr(detection, "MAX_CLAIMS", 4)
+    monkeypatch.setattr(detection, "MIN_SPLIT_CLAIMS", 10)
+    transport = FakeTransport([cut_off(), respond(Detection())])
+
+    result = detection.detect(client=LLMClient(transport=transport), batches=None)
+
+    assert result.failed_batches == 1 and result.failed
+    assert "failed" in result.skipped
+    assert result.claims_considered == 5
+
+
+def test_the_daily_run_reads_only_the_newest_batches(corpus, monkeypatch):
+    monkeypatch.setattr(detection, "MAX_CLAIMS", 2)
+    monkeypatch.setattr(detection, "DAILY_BATCHES", 1)
+    llm, _ = detecting()
+
+    assert detection.detect(client=llm, batches=1).claims_considered == 2
+    assert detection.detect(client=llm, batches=None).claims_considered == 5
 
 
 # ── Continuity ──────────────────────────────────────────────────────────────
