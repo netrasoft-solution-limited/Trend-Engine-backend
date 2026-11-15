@@ -6,7 +6,7 @@ beyond a fixed list rather than only refreshing those three names."
 What it does:
 
   1. Takes the subjects of every collected, non-promotional claim published
-     in the research window, and keeps those raised by two or more items.
+     in the research window, the most discussed first.
   2. Asks the model once to name which subjects are supplement ingredients and
      to group spellings of the same one (cheap, one call, logged with its cost).
   3. Counts distinct items, creators and channels per ingredient from the
@@ -41,8 +41,11 @@ logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "discovery/2026-11-15"
 WINDOW_DAYS = 30
-#: Subjects sent to the model: the most discussed, so the call stays small.
-MAX_SUBJECTS = 250
+#: Subjects sent to the model, most discussed first. Subjects are specific
+#: ("berberine and insulin sensitivity"), so most are raised by one item and
+#: the counting happens after the model groups them; 1,500 short lines is
+#: still one inexpensive call.
+MAX_SUBJECTS = 1500
 MIN_ITEMS = 2
 MIN_CREATORS = 2
 KEEP = 10
@@ -80,7 +83,7 @@ def window() -> tuple:
 
 
 def subject_claims(start, end) -> dict[str, list[Claim]]:
-    """Normalised subject → its claims, for subjects raised by enough items."""
+    """Normalised subject → its claims, the most discussed first."""
     claims = (
         Claim.objects.filter(is_sponsored=False)
         .exclude(content_item__duplicate_status="confirmed")
@@ -92,11 +95,8 @@ def subject_claims(start, end) -> dict[str, list[Claim]]:
     grouped: dict[str, list[Claim]] = defaultdict(list)
     for claim in claims:
         grouped[" ".join(claim.subject.lower().split())].append(claim)
-    kept = {
-        subject: rows for subject, rows in grouped.items()
-        if len({c.content_item_id for c in rows}) >= MIN_ITEMS
-    }
-    ranked = sorted(kept.items(), key=lambda kv: -len({c.content_item_id for c in kv[1]}))
+    ranked = sorted(grouped.items(), key=lambda kv: (-len({c.content_item_id for c in kv[1]}),
+                                                     kv[0]))
     return dict(ranked[:MAX_SUBJECTS])
 
 
