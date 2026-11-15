@@ -167,6 +167,9 @@ def set_adjacent(candidate: Candidate, text: str, *, actor_label: str) -> list[s
     return [n for n in split_names(rest) if n.strip(" ;,")]
 
 
+SEARCH_SOURCE_TYPES = ("search_estimate", "google_trends")
+
+
 def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[list, list]:
     """Attach observations; one already attached for the same video is skipped.
 
@@ -174,12 +177,20 @@ def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[l
     collection, and counted as two (Mark, 31 Oct). Skipped ids are returned
     with the missing ones, so the screen says they were not attached.
     """
-    held = {o.media_key for o in candidate.observations.all() if o.media_key}
+    def video_key(o):
+        # A search reading is not a video: every Trends reading of one export
+        # shares one explore link, and keying on it silently skipped the
+        # 15 Nov Spermidine and Ergothioneine readings.
+        return "" if o.source_type in SEARCH_SOURCE_TYPES else o.media_key
+
+    held = {video_key(o) for o in candidate.observations.all() if video_key(o)}
     found = []
     for o in Observation.objects.filter(pk__in=ids).order_by("pk"):
-        if o.media_key and o.media_key in held:
+        key = video_key(o)
+        if key and key in held:
             continue
-        held.add(o.media_key)
+        if key:
+            held.add(key)
         found.append(o)
     candidate.observations.add(*found)
     attached = [o.pk for o in found]

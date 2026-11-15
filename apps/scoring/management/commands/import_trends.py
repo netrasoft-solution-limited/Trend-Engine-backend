@@ -32,10 +32,13 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         with operator_scope():
             for o in saved:
-                matches = [c for c in Candidate.objects.all()
-                           if o.query.lower() in (n.lower() for n in c.names)]
-                for candidate in matches:
-                    opportunities.attach(candidate, [o.pk], actor_label=by)
+                matches = []
+                for candidate in Candidate.objects.all():
+                    if o.query.lower() not in (n.lower() for n in candidate.names):
+                        continue
+                    attached, _ = opportunities.attach(candidate, [o.pk], actor_label=by)
+                    if attached:
+                        matches.append(candidate)
                 self.stdout.write(
                     f"O{o.pk} {o.query}: {o.metric_label}"
                     + (f" → attached to {', '.join(c.name for c in matches)}" if matches else "")

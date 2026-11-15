@@ -328,3 +328,17 @@ def test_collection_flags_affiliate_videos_and_never_attaches_a_video_twice(cata
     assert again == [] and by_hand.pk in skipped
     keys = [o.media_key for o in candidate.observations.all()]
     assert sorted(keys) == ["youtube:aff", "youtube:dup"]
+
+
+def test_trends_readings_sharing_one_explore_link_are_each_attached(jarrow):
+    """One export, one explore link for every term: not one video (15 Nov)."""
+    link = "https://trends.google.com/trends/explore?q=spermidine,ergothioneine"
+    first = observation(source_type="google_trends", url=link, title="spermidine")
+    second = observation(source_type="google_trends", url=link, title="ergothioneine")
+    candidate = create(jarrow, "Spermidine")
+
+    with scoped(jarrow):
+        attached, skipped = opportunities.attach(candidate, [first.pk, second.pk],
+                                                 actor_label="abu")
+
+    assert attached == [first.pk, second.pk] and skipped == []
