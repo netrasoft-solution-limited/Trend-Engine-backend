@@ -258,9 +258,13 @@ def _summary(organization, candidates, note, sources) -> dict:
         blocks.append("\n".join([
             f"{n}. {c.name}: {c.get_status_display().lower()}",
             "· Current evidence: "
-            + (", ".join(f"{ch.lower()} {counts[ch]['current']}" for ch in present) or "none")
-            + " independent event(s)"
-            + (f"; none in {', '.join(m.lower() for m in missing)}" if missing else "")
+            + (", ".join(f"{ch.lower()} {counts[ch]['current']}" for ch in present
+                         if ch != "Search") or "no")
+            + " independent event(s) in the window"
+            + (f"; none in {', '.join(m.lower() for m in missing if m != 'Search')}"
+               if [m for m in missing if m != "Search"] else "")
+            + ("; a fresh Google Trends reading" if counts["Search"]["current"]
+               else "; no fresh search reading")
             + ".",
             "· Strongest current evidence: "
             + (observation_line(best, sources) if best else "none inside the window."),
@@ -306,16 +310,16 @@ def _what_changed(organization, candidates) -> dict:
     if version is None:
         return {"heading": "What changed since the last memo",
                 "text": "This is the first opportunity memo for this client."}
-    since = version.created_at.date()
+    since = version.created_at
     before = {}
     for section in version.body or []:
         found = re.match(r"(?:A\d+\. )?Candidate \d+: (.+?) — (.+)$", section.get("heading") or "")
         if found:
             before[found.group(1)] = found.group(2)
-    lines = [f"Compared with the memo of {since:%-d %B %Y}:"]
+    lines = [f"Compared with the memo of {since:%-d %B %Y, %H:%M} UTC:"]
     for c in candidates:
-        fresh = [o for o in c.observations.all()
-                 if evidence_class(o) == CURRENT and o.observed_at > since]
+        added = [o for o in c.observations.all() if o.entered_at > since]
+        fresh = [o for o in added if evidence_class(o) in (CURRENT, SEARCH)]
         status = c.get_status_display().lower()
         was = before.get(c.name)
         change = (
@@ -323,7 +327,10 @@ def _what_changed(organization, candidates) -> dict:
             else f"status unchanged ({status})" if was == status
             else f"status {was} → {status}"
         )
-        lines.append(f"· {c.name}: {change}; {len(fresh)} new current observation(s) since then.")
+        lines.append(
+            f"· {c.name}: {change}; {len(fresh)} new current observation(s) or fresh search "
+            f"reading(s) added since then."
+        )
     dropped = [name for name in before if name not in {c.name for c in candidates}]
     if dropped:
         lines.append(f"· No longer included: {', '.join(dropped)}.")
@@ -335,7 +342,7 @@ def _discovered(organization) -> dict | None:
     lacks and no candidate covers (Mark, 15 Nov: show discovery beyond a fixed list)."""
     from apps.scoring import discovery
 
-    found = discovery.latest(organization)
+    found = [d for d in discovery.latest(organization) if d.status == d.Status.NEW]
     if not found:
         return None
     lines = ["| Ingredient | Independent items | Creators | Channels | Status |"]
