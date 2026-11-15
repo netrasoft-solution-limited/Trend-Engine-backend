@@ -323,3 +323,28 @@ class DetectionRunListView(View):
             "spent": spent,
             "failing": failing,
         })
+
+    def post(self, request):
+        """Run detection now, then ranking, exactly as the 06:00 run does.
+
+        Dispatched by name onto the enrich queue (intelligence sits above
+        enrichment), so it waits behind any extraction still in progress.
+        """
+        from celery import current_app
+
+        from apps.operations.models import AuditEvent
+
+        current_app.send_task("apps.intelligence.tasks.detect_signals", queue="enrich")
+        AuditEvent.objects.create(
+            kind=AuditEvent.Kind.CONFIG,
+            actor_realm=AuditEvent.Realm.OPERATOR,
+            actor_label=getattr(request.user, "email", str(request.user)),
+            message="Started signal detection by hand",
+            context={},
+        )
+        messages.info(
+            request,
+            "Detection started. It reads the newest claims from every channel, then ranks "
+            "the signals for each client; the run appears here within a few minutes.",
+        )
+        return redirect(reverse("ops-detection-runs"))

@@ -21,3 +21,18 @@ def test_the_page_lists_runs_and_shows_a_failure(client):
 
     assert "1 failing" in page and "1 batch(es) failed: cut off" in page
     assert reverse("ops-detection-runs") in client.get(reverse("ops-runs")).content.decode()
+
+
+def test_detection_can_be_started_by_hand(client, monkeypatch):
+    sent = []
+    from celery import current_app
+
+    monkeypatch.setattr(current_app, "send_task", lambda name, **kw: sent.append((name, kw)))
+    client.force_login(OperatorUser.objects.create_user(
+        email="o@x.test", password="x" * 24, name="O"))
+
+    response = client.post(reverse("ops-detection-runs"))
+
+    assert response.status_code == 302
+    assert sent == [("apps.intelligence.tasks.detect_signals", {"queue": "enrich"})]
+    assert AuditEvent.objects.filter(message="Started signal detection by hand").exists()

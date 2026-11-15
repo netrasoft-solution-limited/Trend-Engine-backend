@@ -16,6 +16,10 @@
       <div class="stat"><b>{{ runs|length }}</b><span>recent runs</span></div>
       <div class="stat"><b>${{ spent|floatformat:2 }}</b><span>detection cost this month</span></div>
     </div>
+    <form method="post" style="margin-top:12px">{% csrf_token %}
+      <button type="submit">Run detection now</button>
+      <span class="note">Then ranking for every client, as the daily 06:00 UTC run does.</span>
+    </form>
   </div>
 
   <div class="card">
