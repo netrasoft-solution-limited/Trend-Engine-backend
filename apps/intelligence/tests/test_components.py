@@ -204,7 +204,16 @@ def test_a_single_week_unmeasured_is_a_watch_item():
 
 def test_only_measured_rising_momentum_is_a_trend():
     baseline = [fact(i, days_ago=8 + 7 * (i % 4)) for i in range(4)]
-    surge = [fact(100 + i, creator=f"C{i}", days_ago=1) for i in range(4)]
+    surge = [fact(100 + i, creator=f"C{i}", days_ago=1) for i in range(5)]
 
     assert score(baseline + surge).maturity == components.MEASURED_TREND
     assert score(baseline + surge, covered_weeks=0).maturity != components.MEASURED_TREND
+
+
+def test_a_rise_on_a_handful_of_items_is_not_a_measured_trend():
+    """2 items against 0.5 a week is +300% and means nothing (Mark, 15 Nov:
+    counts are printed beside every status)."""
+    baseline = [fact(i, days_ago=8 + 7 * i) for i in range(2)]
+    surge = [fact(100 + i, creator=f"C{i}", days_ago=1) for i in range(2)]
+
+    assert score(baseline + surge).maturity == components.RECURRING

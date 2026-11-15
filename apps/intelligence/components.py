@@ -57,6 +57,10 @@ MOMENTUM_NEEDS_WEEKS = 5
 ACCELERATION_NEEDS_WEEKS = 3
 #: Momentum at or above this, measured, is a rising trend.
 RISING = 60
+#: ...and only on enough items to be a measurement. Two items against a
+#: baseline of half an item a week is +300% and means nothing; with the counts
+#: now printed beside every status (Mark, 15 Nov), it would read as such.
+MEASURED_MIN_ITEMS = 5
 
 #: What a development can honestly be called, given what has been measured.
 MEASURED_TREND = "measured_trend"
@@ -193,7 +197,7 @@ def _covered_streak(coverage: list[dict]) -> int:
 def _maturity(momentum: float | None, weekly: list[int]) -> str:
     """Measured rising trend only when momentum was measured and is rising.
     Otherwise: recurring if the evidence spans two or more weeks, else watch."""
-    if momentum is not None and momentum >= RISING:
+    if momentum is not None and momentum >= RISING and weekly and weekly[0] >= MEASURED_MIN_ITEMS:
         return MEASURED_TREND
     if sum(1 for n in weekly if n) >= 2:
         return RECURRING
