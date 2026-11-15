@@ -46,6 +46,8 @@ WINDOW_DAYS = 30
 #: the counting happens after the model groups them; 1,500 short lines is
 #: still one inexpensive call.
 MAX_SUBJECTS = 1500
+#: Subjects per call, so each answer stays well under its ceiling.
+CHUNK = 300
 MIN_ITEMS = 2
 MIN_CREATORS = 2
 KEEP = 10
@@ -131,26 +133,34 @@ def discover(organization, *, client: LLMClient | None = None,
     if not subjects:
         return []
     numbered = list(subjects)
-    listing = "\n".join(f"{n}. {s}" for n, s in enumerate(numbered, start=1))
-    naming = (client or LLMClient()).structured(
-        schema=Naming,
-        tier=extraction_tier(),
-        purpose=ModelRun.Purpose.DISCOVERY,
-        prompt_version=PROMPT_VERSION,
-        system=cached_system(INSTRUCTIONS),
-        user=f"Subjects:\n{listing}",
-    )
+    llm = client or LLMClient()
+    # Ingredient name (lower case) → (display name, subject numbers), merged
+    # across chunks: one call over every subject outgrew its answer ceiling.
+    named_subjects: dict[str, tuple[str, set[int]]] = {}
+    for first in range(0, len(numbered), CHUNK):
+        chunk = numbered[first:first + CHUNK]
+        listing = "\n".join(f"{n}. {s}" for n, s in enumerate(chunk, start=1))
+        naming = llm.structured(
+            schema=Naming,
+            tier=extraction_tier(),
+            purpose=ModelRun.Purpose.DISCOVERY,
+            prompt_version=PROMPT_VERSION,
+            system=cached_system(INSTRUCTIONS),
+            user=f"Subjects:\n{listing}",
+        )
+        for named in naming.ingredients:
+            name = " ".join(named.ingredient.split())
+            if not name:
+                continue
+            shown, ids = named_subjects.setdefault(name.lower(), (name, set()))
+            ids.update(first + i for i in named.subjects if 1 <= i <= len(chunk))
 
     catalogue = _catalogue_text(organization)
     known = _known(organization)
     proposals = []
-    for named in naming.ingredients:
-        name = " ".join(named.ingredient.split())
-        rows = [c for i in named.subjects if 1 <= i <= len(numbered)
-                for c in subjects[numbered[i - 1]]]
-        if not name or not rows:
-            continue
-        if name.lower() in known or _sold(name, catalogue):
+    for name, ids in named_subjects.values():
+        rows = [c for i in sorted(ids) for c in subjects[numbered[i - 1]]]
+        if not rows or name.lower() in known or _sold(name, catalogue):
             continue
         items = {c.content_item_id for c in rows}
         creators = {
@@ -159,7 +169,7 @@ def discover(organization, *, client: LLMClient | None = None,
         if len(items) < MIN_ITEMS or len(creators) < MIN_CREATORS:
             continue
         channels = sorted({c.content_item.platform for c in rows})
-        proposals.append((name, items, creators, channels, rows, named.subjects))
+        proposals.append((name, items, creators, channels, rows, sorted(ids)))
 
     proposals.sort(key=lambda p: (-len(p[3]), -len(p[1]), p[0]))
     now = timezone.now()
