@@ -534,10 +534,47 @@ def test_the_brand_is_on_the_cover_and_running_lines(settings):
     settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
     html = exports.render(doc(), "html").content.decode()
 
-    assert '<div class="brand">PURE PLAY ECOMMERCE CONSULTING</div>' in html
+    assert 'alt="Pure Play Ecommerce Consulting"' in html
     assert "Confidential. Prepared for Jarrow Formulas." in html
     settings.EXPORT_BRAND = ""
-    assert 'class="brand"' not in exports.render(doc(), "html").content.decode()
+    plain = exports.render(doc(), "html").content.decode()
+    assert 'class="brand"' not in plain and 'class="masthead"' not in plain
+
+
+def test_the_masthead_carries_both_logos_inline(settings):
+    """Pure Play's logo at left, the client's beside "Prepared for" (Mark, 15 Nov).
+
+    Inline data, so the PDF renderer needs no file or network access.
+    """
+    settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
+    html = exports.render(doc(organization_slug="jarrow"), "html").content.decode()
+
+    assert 'src="data:image/png;base64,' in html  # the consultancy's PNG
+    assert 'src="data:image/svg+xml;base64,' in html  # the client's SVG
+    assert "Prepared for</span>" in html
+
+
+def test_a_client_without_a_logo_gets_only_the_consultancy_logo(settings):
+    settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
+    document = doc(organization_slug="no-such-client")
+
+    assert document.brand_logo is not None and document.client_logo is None
+    assert "Prepared for</span>" not in exports.render(document, "html").content.decode()
+
+
+@requires_docx
+def test_a_docx_masthead_embeds_both_logos_and_stays_deterministic(settings):
+    import io
+    import zipfile
+
+    settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
+    document = doc(organization_slug="jarrow")
+    first = exports.render(document, "docx").content
+
+    names = zipfile.ZipFile(io.BytesIO(first)).namelist()
+    media = [n for n in names if n.startswith("word/media/")]
+    assert len(media) == 2
+    assert first == exports.render(document, "docx").content
 
 
 @requires_docx
@@ -549,7 +586,8 @@ def test_a_docx_carries_the_table_and_the_running_header(settings):
     settings.EXPORT_BRAND = "Pure Play Ecommerce Consulting"
     word = Document(io.BytesIO(exports.render(doc(body=TABLE_BODY), "docx").content))
 
-    assert word.tables[0].cell(1, 0).text == "Spermidine"
+    # tables[0] is the logo masthead; the content table follows it.
+    assert word.tables[-1].cell(1, 0).text == "Spermidine"
     assert "PURE PLAY ECOMMERCE CONSULTING" in word.sections[0].header.paragraphs[0].text
 
 
@@ -586,5 +624,5 @@ def test_word_table_columns_are_sized_to_their_contents():
         body=[{"heading": "Table", "text": f"| Status | Action |\n| Test | {long} |"}],
     )
     word = Document(io.BytesIO(exports.render(document, "docx").content))
-    status, action = word.tables[0].columns
+    status, action = word.tables[-1].columns
     assert action.width > 2 * status.width

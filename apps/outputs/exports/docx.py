@@ -26,11 +26,12 @@ import zipfile
 from datetime import datetime
 
 from docx import Document
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Mm, Pt, RGBColor
 
 from .document import ExportDocument
 from .text import spans
@@ -55,6 +56,8 @@ def render(document: ExportDocument) -> bytes:
     if document.brand:
         _running(doc.sections[0].header.paragraphs[0], document.running_header)
         _running(doc.sections[0].footer.paragraphs[0], document.running_footer)
+        if document.brand_logo or document.client_logo:
+            _masthead(doc, document)
 
     if document.has_notice:
         notice = doc.add_paragraph()
@@ -120,6 +123,36 @@ def render(document: ExportDocument) -> bytes:
     buffer = io.BytesIO()
     doc.save(buffer)
     return _normalise(buffer.getvalue())
+
+
+def _masthead(doc, document: ExportDocument) -> None:
+    """Consultancy logo at left, "Prepared for" and the client's logo at right.
+
+    A borderless two-cell table, the Word equivalent of the PDF masthead.
+    Pictures are PNG: Word cannot embed the SVG the PDF uses.
+    """
+    table = doc.add_table(rows=1, cols=2)
+    table.autofit = False
+    section = doc.sections[-1]
+    page = section.page_width - section.left_margin - section.right_margin
+    for c, share in enumerate((0.6, 0.4)):
+        table.columns[c].width = int(page * share)
+        table.cell(0, c).width = int(page * share)
+    left, right = table.cell(0, 0), table.cell(0, 1)
+    left.vertical_alignment = right.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    if document.brand_logo:
+        left.paragraphs[0].add_run().add_picture(io.BytesIO(document.brand_logo.png), height=Mm(12))
+    if document.client_logo:
+        label = right.paragraphs[0]
+        label.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        label.paragraph_format.space_after = Pt(2)
+        run = label.add_run("PREPARED FOR")
+        run.font.size = Pt(7)
+        run.font.color.rgb = MUTED
+        picture = right.add_paragraph()
+        picture.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        picture.add_run().add_picture(io.BytesIO(document.client_logo.png), height=Mm(8))
+    doc.add_paragraph()
 
 
 def _running(paragraph, text: str) -> None:
@@ -208,7 +241,7 @@ def _hyperlink(paragraph, url: str, label: str) -> None:
     style = OxmlElement("w:rStyle")
     style.set(qn("w:val"), "Hyperlink")
     color = OxmlElement("w:color")
-    color.set(qn("w:val"), "1F5140")
+    color.set(qn("w:val"), "14284A")
     underline = OxmlElement("w:u")
     underline.set(qn("w:val"), "single")
     properties.extend([style, color, underline])

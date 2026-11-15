@@ -26,6 +26,7 @@ def document_for_version(version, *, is_draft: bool | None = None) -> ExportDocu
         title=output.title,
         type_label=output.get_type_display(),
         organization_name=version.organization.name,
+        organization_slug=version.organization.slug,
         summary=version.summary,
         body=version.body,
         is_draft=is_draft,

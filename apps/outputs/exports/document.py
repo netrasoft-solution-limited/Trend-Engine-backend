@@ -25,8 +25,11 @@ renders — not the moment the file was built.
 """
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 
 from .text import Block, blocks
 
@@ -34,7 +37,7 @@ from .text import Block, blocks
 #: `ExportArtifact` so that a file regenerated months later can be compared
 #: honestly: without it, a mismatch cannot distinguish changed content from a
 #: changed template.
-RENDERER_VERSION = "1"
+RENDERER_VERSION = "2"
 
 #: Shown on anything not yet published. The gate's whole purpose is that
 #: approved is not client-visible, and this module can hand an operator a
@@ -56,6 +59,36 @@ CORRECTION_HEADING = "Correction to this record"
 #: Used as document metadata when there is no publication date. Any fixed
 #: value; what matters is that it is not the clock.
 STABLE_FALLBACK_DATE = date(1980, 1, 1)
+
+
+#: Logo files shipped with the renderer. `brand.png` is the consultancy's mark;
+#: `clients/<organization slug>.png` (and an optional `.svg`, which the PDF
+#: prefers for sharpness) is the client's. Word cannot embed SVG, so the PNG is
+#: the one every client logo must have.
+ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+@dataclass(frozen=True)
+class Logo:
+    png: bytes
+    svg: bytes = b""
+
+    @property
+    def data_uri(self) -> str:
+        """Inline, so the HTML and PDF need no file or network access."""
+        if self.svg:
+            return "data:image/svg+xml;base64," + base64.b64encode(self.svg).decode("ascii")
+        return "data:image/png;base64," + base64.b64encode(self.png).decode("ascii")
+
+
+@lru_cache(maxsize=32)
+def load_logo(stem: str) -> Logo | None:
+    """`stem` relative to `ASSETS`, without extension; None when there is no PNG."""
+    png = ASSETS / f"{stem}.png"
+    if not stem or not png.is_file():
+        return None
+    svg = ASSETS / f"{stem}.svg"
+    return Logo(png=png.read_bytes(), svg=svg.read_bytes() if svg.is_file() else b"")
 
 
 @dataclass(frozen=True)
@@ -95,6 +128,10 @@ class ExportDocument:
     #: The consultancy the document is issued under, from `EXPORT_BRAND`.
     #: Blank leaves every format unbranded.
     brand: str = ""
+    #: The consultancy's logo, shown in the masthead when `brand` is set.
+    brand_logo: Logo | None = None
+    #: The client's logo, shown in the masthead beside "Prepared for".
+    client_logo: Logo | None = None
 
     @property
     def running_header(self) -> str:
@@ -160,6 +197,7 @@ def document_from_body(
     is_illustrative: bool = False,
     corrections: tuple[str, ...] | list[str] = (),
     brand: str | None = None,
+    organization_slug: str = "",
 ) -> ExportDocument:
     """Build a document from the stored `body` shape.
 
@@ -168,6 +206,7 @@ def document_from_body(
     an empty heading in the output is a visible fault, where a silently dropped
     one is not.
     """
+    brand = _brand() if brand is None else brand
     return ExportDocument(
         title=title,
         type_label=type_label,
@@ -192,7 +231,12 @@ def document_from_body(
         provenance=provenance or Provenance(),
         is_illustrative=is_illustrative,
         is_corrected=any(text and text.strip() for text in corrections),
-        brand=_brand() if brand is None else brand,
+        brand=brand,
+        # Logos only on a branded document: an unbranded export stays plain.
+        brand_logo=load_logo("brand") if brand else None,
+        client_logo=(
+            load_logo(f"clients/{organization_slug}") if brand and organization_slug else None
+        ),
     )
 
 

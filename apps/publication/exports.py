@@ -19,6 +19,7 @@ def document_for_publication(publication) -> ExportDocument:
         title=publication.title,
         type_label=publication.type_label,
         organization_name=publication.organization.name,
+        organization_slug=publication.organization.slug,
         summary=publication.summary,
         body=publication.body,
         is_draft=publication.unpublished_at is not None,

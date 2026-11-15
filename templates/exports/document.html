@@ -36,11 +36,23 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
   .brand {
     font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
     font-size: 8.5pt; font-weight: bold; letter-spacing: .14em;
-    color: #fff; background: #1f5140; padding: 8pt 10pt; margin: 0 0 18pt;
+    color: #fff; background: #14284a; padding: 8pt 10pt; margin: 0 0 18pt;
+  }
+  /* Consultancy logo on its own dark band at left, client logo at right. */
+  table.masthead { margin: 0 0 18pt; border-bottom: .5pt solid #d9d6d0; }
+  table.masthead td { border: 0; padding: 0 0 10pt; vertical-align: middle; }
+  .masthead-brand img { height: 12mm; width: auto; display: block; }
+  .masthead-brand .brand-text { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; font-size: 8.5pt; font-weight: bold; letter-spacing: .14em; }
+  .masthead-client { text-align: right; }
+  .masthead-client img { height: 8mm; width: auto; display: inline-block; vertical-align: middle; }
+  .prepared-for {
+    display: block; margin-bottom: 3pt;
+    font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+    font-size: 7pt; letter-spacing: .12em; text-transform: uppercase; color: #6b6864;
   }
   table { width: 100%; border-collapse: collapse; margin: 0 0 11pt; font-size: 9.5pt; }
   th, td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: .5pt solid #d9d6d0; }
-  th { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; font-size: 8.5pt; color: #1f5140; border-bottom: 1pt solid #1f5140; }
+  th { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; font-size: 8.5pt; color: #14284a; border-bottom: 1pt solid #14284a; }
   tr { page-break-inside: avoid; }
   html { font-size: 11pt; }
   /* `@page` margins apply only when printing, so on screen the same file would
@@ -85,7 +97,7 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
     page-break-after: avoid;
   }
   p { margin: 0 0 9pt; orphans: 2; widows: 2; }
-  a { color: #1f5140; }
+  a { color: #14284a; }
   ul { margin: 0 0 9pt; padding-left: 16pt; }
   li { margin-bottom: 4pt; }
   .provenance {
@@ -100,7 +112,14 @@ which makes ExportArtifact.sha256 worthless.{% endcomment %}
 </head>
 <body>
   {% if document.brand %}
-    <div class="brand">{{ document.brand|upper }}</div>
+    {% if document.brand_logo or document.client_logo %}
+      <table class="masthead"><tr>
+        <td class="masthead-brand">{% if document.brand_logo %}<img src="{{ document.brand_logo.data_uri }}" alt="{{ document.brand }}">{% else %}<span class="brand-text">{{ document.brand|upper }}</span>{% endif %}</td>
+        <td class="masthead-client">{% if document.client_logo %}<span class="prepared-for">Prepared for</span><img src="{{ document.client_logo.data_uri }}" alt="{{ document.organization_name }}">{% endif %}</td>
+      </tr></table>
+    {% else %}
+      <div class="brand">{{ document.brand|upper }}</div>
+    {% endif %}
     <div class="running">{{ document.running_header }}</div>
     <div class="footer-text">{{ document.running_footer }}</div>
   {% endif %}
