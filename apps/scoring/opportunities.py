@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import timedelta
 
 from django.db import transaction
 from django.db.models.functions import Coalesce
@@ -45,7 +46,7 @@ from .models import Candidate
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "opportunity/2026-10-21"
+PROMPT_VERSION = "opportunity/2026-11-15"
 
 #: Fields an analyst edits on the candidate page.
 EDITABLE = ("opening", "why_it_matters", "test_plan", "next_step", "gate", "limits",
@@ -401,6 +402,11 @@ Rules:
 - This is commercial research, not a launch recommendation. Make no health claims.
 - Prefer a monitor recommendation when the evidence is old, single-channel or
   mostly paid.
+- Each observation is marked CURRENT, OLDER, UNDATED, PROMOTIONAL or SEARCH.
+  Only CURRENT observations are evidence of interest in the research window.
+  OLDER and UNDATED ones are background: never describe them as recent. A
+  search figure marked "not fresh" must be given with the date it was
+  retrieved and never presented as current research.
 """
 
 
@@ -411,10 +417,26 @@ def _render(candidate: Candidate, observations: list[Observation]) -> str:
         + (f" (also sold as {', '.join(candidate.aliases)})" if candidate.aliases else ""),
         f"Catalogue: {gap_sentence(candidate)}",
         f"Would sit beside: {', '.join(candidate.adjacent) or 'not chosen'}",
+        f"Research window: {timezone.localdate() - timedelta(days=COLLECT_DAYS)} to "
+        f"{timezone.localdate()}",
         "",
         "Observations:",
     ]
+    today = timezone.localdate()
+    start = today - timedelta(days=COLLECT_DAYS)
     for o in observations:
+        if o.source_type in SEARCH_SOURCE_TYPES:
+            fresh = (o.metric_kind == Observation.MetricKind.TRENDS
+                     and o.observed_at >= today - timedelta(days=14))
+            standing = f"SEARCH ({'fresh' if fresh else 'not fresh'}, retrieved {o.observed_at})"
+        elif o.is_ad or o.is_brand_content:
+            standing = "PROMOTIONAL"
+        elif o.is_old_material or (o.published_at and o.published_at < start):
+            standing = f"OLDER (before {start})"
+        elif not o.published_at and o.source_type not in ("catalogue", "research"):
+            standing = "UNDATED"
+        else:
+            standing = "CURRENT"
         figure = (
             f" Figure: {o.metric_label or o.metric_value} ({o.get_metric_kind_display()})"
             if o.metric_kind else ""
@@ -425,7 +447,7 @@ def _render(candidate: Candidate, observations: list[Observation]) -> str:
         )
         labels = f" Labels: {', '.join(o.labels)}." if o.labels else ""
         lines.append(
-            f"O{o.pk}. {o.get_source_type_display()}, published "
+            f"O{o.pk} [{standing}]. {o.get_source_type_display()}, published "
             f"{o.published_at or 'unknown'}, observed {o.observed_at}: {o.title}. "
             f"{o.excerpt}{figure}{search}{labels} {o.limitations}".strip()
         )
