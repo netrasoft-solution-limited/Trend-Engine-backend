@@ -72,6 +72,8 @@ def problems() -> list[dict]:
             "since": streak[-1].at,
             "count": len(streak),
             "unit": "run",
+            # Appended to the Runs link: /runs/detection/.
+            "anchor": "detection/",
         })
 
     stuck = list(failures.unanalysed()[:50])

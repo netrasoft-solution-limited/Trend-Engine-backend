@@ -290,3 +290,36 @@ def _timestamp(seconds: float | None) -> str:
     hours, rest = divmod(whole, 3600)
     minutes, secs = divmod(rest, 60)
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+#: The audit actor `apps.intelligence.health` records each detection run under.
+#: Named here rather than imported: intelligence sits above enrichment.
+DETECTION_ACTOR = "signal-detection"
+
+
+class DetectionRunListView(View):
+    """Every daily detection run and every model call it made (Mark, 15 Nov:
+    "show run records and how failures become visible")."""
+
+    def get(self, request):
+        from apps.operations.models import AuditEvent
+
+        runs = list(AuditEvent.objects.filter(actor_label=DETECTION_ACTOR).order_by("-at")[:30])
+        calls = list(
+            ModelRun.objects.filter(purpose=ModelRun.Purpose.DETECTION).order_by("-at")[:60]
+        )
+        month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        spent = ModelRun.objects.filter(
+            purpose=ModelRun.Purpose.DETECTION, at__gte=month
+        ).aggregate(total=Coalesce(Sum("cost_usd"), ZERO))["total"]
+        failing = 0
+        for event in runs:
+            if not (event.context or {}).get("failed"):
+                break
+            failing += 1
+        return render(request, "ops/evidence/detection_runs.html", {
+            "runs": runs,
+            "calls": calls,
+            "spent": spent,
+            "failing": failing,
+        })

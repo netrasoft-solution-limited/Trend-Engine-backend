@@ -1,0 +1,67 @@
+{% extends "ops/base.html" %}
+{% block title %}Detection runs{% endblock %}
+
+{% block content %}
+  <h1>Detection runs</h1>
+  <p class="lede">
+    Each run of signal detection: how many claims it read, the developments it opened
+    or extended, and whether it worked. A failed run raises the banner on every
+    operator page at once; two in a row also email the review address. Below, every
+    model call those runs made.
+  </p>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><b>{% if failing %}{{ failing }} failing{% else %}working{% endif %}</b><span>current state</span></div>
+      <div class="stat"><b>{{ runs|length }}</b><span>recent runs</span></div>
+      <div class="stat"><b>${{ spent|floatformat:2 }}</b><span>detection cost this month</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="name">Runs</span>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When (UTC)</th><th>Result</th><th class="num">Claims read</th><th class="num">New</th><th class="num">Extended</th><th>Detail</th></tr></thead>
+        <tbody>
+          {% for r in runs %}
+            <tr>
+              <td>{{ r.at|date:"j M, H:i" }}</td>
+              <td>{% if r.context.failed %}<span class="pill error">failed</span>{% else %}<span class="pill live">worked</span>{% endif %}</td>
+              <td class="num">{{ r.context.claims }}</td>
+              <td class="num">{{ r.context.created|length }}</td>
+              <td class="num">{{ r.context.extended|length }}</td>
+              <td class="muted">{% if r.context.failed %}{{ r.context.failed_batches }} batch(es) failed: {{ r.context.errors|last }}{% else %}{{ r.message }}{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="empty">No detection run recorded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="name">Model calls</span>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">#</th><th>When (UTC)</th><th>Outcome</th><th>Model</th><th class="num">Tokens in / out</th><th class="num">Cost</th><th>Error</th></tr></thead>
+        <tbody>
+          {% for c in calls %}
+            <tr>
+              <td class="num">{{ c.pk }}</td>
+              <td>{{ c.at|date:"j M, H:i" }}</td>
+              <td>{{ c.get_outcome_display }}</td>
+              <td class="muted">{{ c.model }}</td>
+              <td class="num">{{ c.input_tokens }} / {{ c.output_tokens }}</td>
+              <td class="num">${{ c.cost_usd|floatformat:3 }}</td>
+              <td class="muted">{{ c.error|truncatechars:120 }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">No detection call yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
