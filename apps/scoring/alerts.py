@@ -16,6 +16,8 @@ from apps.sources.models import Source
 #: Vendor errors an operator should read in plain words.
 PLAIN = (
     ("credit balance is too low", "the Anthropic account is out of credit — top it up"),
+    ("usage limits", "the Anthropic workspace has reached its usage limit — raise it in the "
+     "Anthropic console (Settings → Limits)"),
     ("build-not-found", "the collector build no longer exists"),
     ("invalid x-api-key", "the API key was rejected"),
     ("cut off before it finished", "the AI answer was cut off part-way"),

@@ -16,7 +16,14 @@ from . import detection, health
 
 @shared_task(name="apps.intelligence.tasks.detect_signals")
 def detect_signals() -> dict:
-    result = asdict(detection.detect())
+    try:
+        result = asdict(detection.detect())
+    except Exception as exc:
+        # Whatever stopped it, the run is recorded as failed, so the banner and
+        # the alert see it (16–19 Nov: four mornings failed and left no record).
+        health.record_crash(exc)
+        health.alert_if_failing()
+        raise
     health.alert_if_failing()
     # Per-client ranking is L5 and this is L4, so it is dispatched by NAME —
     # the same decoupling `apps.evidence` uses to hand items to the gate.

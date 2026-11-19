@@ -52,6 +52,19 @@ def record(result) -> AuditEvent:
     )
 
 
+def record_crash(exc: Exception) -> AuditEvent:
+    """A run that stopped on an unexpected error, recorded like any failed run."""
+    error = f"{type(exc).__name__}: {exc}"[:500]
+    return AuditEvent.objects.create(
+        kind=AuditEvent.Kind.SYSTEM,
+        actor_realm=AuditEvent.Realm.SYSTEM,
+        actor_label=ACTOR,
+        message=f"Signal detection failed: {error}"[:2000],
+        context={"failed": True, "failed_batches": 0, "errors": [error], "claims": 0,
+                 "created": [], "extended": []},
+    )
+
+
 def failing_streak() -> list[AuditEvent]:
     """The failed runs since the last one that worked, newest first."""
     streak = []

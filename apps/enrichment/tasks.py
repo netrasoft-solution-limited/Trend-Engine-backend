@@ -147,6 +147,11 @@ def assess_pending(limit: int = 100) -> dict:
     this picks up what the last run could not afford — which is why the gate
     records those as PENDING rather than as rejections.
     """
+    from .llm.client import account_blocked
+
+    if account_blocked():
+        # Every call would be refused; the items stay pending until it clears.
+        return {"dispatched": 0, "skipped": "the AI account is refusing calls"}
     pending = ContentItem.objects.filter(
         gate_decision=ContentItem.GateDecision.PENDING
     ).order_by("discovered_at")[:limit]

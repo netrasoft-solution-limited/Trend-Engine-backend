@@ -46,6 +46,36 @@ class LLMUnavailable(RuntimeError):
     """
 
 
+#: Errors that mean the account itself refuses every call until someone acts:
+#: retrying sends the same request into the same refusal. 16–19 Nov: the
+#: workspace reached its usage limit and 18,000 calls failed, detection among
+#: them, without detection recording a run.
+ACCOUNT_BLOCKED = ("usage limits", "credit balance is too low")
+#: While blocked, calls are refused here rather than sent, and one is let
+#: through to check again after this long.
+BLOCKED_RECHECK_SECONDS = 30 * 60
+BLOCKED_KEY = "llm:account-blocked"
+
+
+def account_blocked() -> str:
+    """The provider's refusal, while the account is known to be blocked."""
+    from django.core.cache import cache
+
+    try:
+        return cache.get(BLOCKED_KEY) or ""
+    except Exception:  # the cache is an optimisation, never a new failure
+        return ""
+
+
+def _mark_blocked(message: str) -> None:
+    from django.core.cache import cache
+
+    try:
+        cache.set(BLOCKED_KEY, message[:500], BLOCKED_RECHECK_SECONDS)
+    except Exception:
+        logger.warning("Could not remember that the AI account is blocked")
+
+
 class LLMInvalidOutput(RuntimeError):
     """The model answered, but not in the shape the schema requires."""
 
@@ -199,6 +229,12 @@ class LLMClient:
             )
             raise
 
+        blocked = account_blocked()
+        if blocked:
+            raise LLMUnavailable(
+                f"{purpose}: not sent; the Anthropic account is refusing calls ({blocked})"
+            )
+
         started = time.monotonic()
         try:
             response = self.client.messages.parse(
@@ -236,6 +272,11 @@ class LLMClient:
                 prompt_version=prompt_version, content_item=content_item,
                 latency_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:2000],
             )
+            if any(marker in str(exc).lower() for marker in ACCOUNT_BLOCKED):
+                _mark_blocked(_provider_message(exc))
+                raise LLMUnavailable(
+                    f"{purpose}: the Anthropic account refused the call: {_provider_message(exc)}"
+                ) from exc
             raise
 
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -418,3 +459,12 @@ def cached_system(stable: str, volatile: str = "") -> list[dict]:
     if volatile:
         blocks.append({"type": "text", "text": volatile})
     return blocks
+
+
+def _provider_message(exc: Exception) -> str:
+    """The provider's own sentence, without the request envelope around it."""
+    import re
+
+    text = str(exc)
+    found = re.search(r"'message': '([^']+)'", text)
+    return (found.group(1) if found else text)[:300]
