@@ -426,3 +426,16 @@ def test_every_batch_takes_the_channels_in_turn():
     ordered = [c.pk for c in detection.interleave_channels(claims)]
 
     assert ordered == [1, 4, 5, 2, 6, 3]
+
+
+def test_a_crashed_detection_run_is_recorded_as_failed(monkeypatch):
+    from apps.intelligence import health, tasks
+
+    def crash(**kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(detection, "detect", crash)
+    with pytest.raises(RuntimeError):
+        tasks.detect_signals()
+
+    assert health.failing_streak()[0].context["errors"] == ["RuntimeError: boom"]

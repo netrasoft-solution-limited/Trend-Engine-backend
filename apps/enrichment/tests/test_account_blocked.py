@@ -48,19 +48,6 @@ def test_a_usage_limit_is_unavailable_and_stops_further_calls():
     assert ModelRun.objects.filter(outcome="errored").count() == 1
 
 
-def test_a_crashed_detection_run_is_recorded_as_failed(monkeypatch):
-    from apps.intelligence import detection, health, tasks
-
-    def crash(**kw):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(detection, "detect", crash)
-    with pytest.raises(RuntimeError):
-        tasks.detect_signals()
-
-    assert health.failing_streak()[0].context["errors"] == ["RuntimeError: boom"]
-
-
 def test_pending_items_are_not_dispatched_while_blocked():
     from apps.enrichment import tasks
 
