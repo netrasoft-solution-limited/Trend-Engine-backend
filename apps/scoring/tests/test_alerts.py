@@ -107,3 +107,26 @@ def test_the_review_address_is_emailed_once_per_streak(db, settings, mailoutbox)
     assert message.to == ["mark@omnialta.com"]
     assert "Signal detection is failing" in message.subject
     assert "cut off" in message.body
+
+
+
+def test_a_source_that_stops_collecting_anything_is_on_the_banner(podcast):  # noqa: F811
+    """15–19 Nov: Reddit's actor returned nothing and every run 'succeeded'."""
+    IngestionRun.objects.create(source=podcast, status=IngestionRun.Status.SUCCEEDED,
+                                items_collected=20)
+    for _ in range(2):
+        IngestionRun.objects.create(source=podcast, status=IngestionRun.Status.SUCCEEDED,
+                                    items_collected=0)
+
+    [problem] = [p for p in problems() if "collecting nothing" in p["what"]]
+
+    assert podcast.name in problem["why"]
+
+
+def test_one_empty_run_is_not_a_problem(podcast):  # noqa: F811
+    IngestionRun.objects.create(source=podcast, status=IngestionRun.Status.SUCCEEDED,
+                                items_collected=20)
+    IngestionRun.objects.create(source=podcast, status=IngestionRun.Status.SUCCEEDED,
+                                items_collected=0)
+
+    assert not [p for p in problems() if "collecting nothing" in p["what"]]

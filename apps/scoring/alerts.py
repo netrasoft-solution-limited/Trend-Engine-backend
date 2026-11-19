@@ -52,6 +52,20 @@ def problems() -> list[dict]:
             "count": failing.filter(status=IngestionRun.Status.FAILED).count(),
         })
 
+    # A source that used to bring items and now brings none, while every run
+    # "succeeds". 15–19 Nov: the Reddit actor returned 0 rows with an error in
+    # its own log, and 18 runs said "succeeded".
+    empty = _collecting_nothing()
+    if empty:
+        found.append({
+            "what": f"{len(empty)} source(s) are collecting nothing",
+            "why": "the last two runs found no items where earlier runs did: "
+            + ", ".join(s.name for s, _ in empty[:4]) + ("…" if len(empty) > 4 else ""),
+            "since": min(since for _, since in empty),
+            "count": len(empty),
+            "unit": "source",
+        })
+
     runs = ModelRun.objects.order_by("-at")
     latest = runs.first()
     if latest is not None and latest.outcome == ModelRun.Outcome.ERRORED:
@@ -89,3 +103,28 @@ def problems() -> list[dict]:
             "anchor": "#unanalysed",
         })
     return found
+
+
+#: Consecutive empty, successful runs before a source counts as collecting nothing.
+EMPTY_RUNS = 2
+
+
+def _collecting_nothing() -> list[tuple]:
+    """(source, since) for each active source whose latest runs succeeded with
+    no items at all, though an earlier run collected some."""
+    out = []
+    for source in Source.objects.filter(status=Source.Status.ACTIVE):
+        runs = list(IngestionRun.objects.filter(source=source).order_by("-pk")[:EMPTY_RUNS])
+        if len(runs) < EMPTY_RUNS or any(
+            r.status != IngestionRun.Status.SUCCEEDED or r.items_collected for r in runs
+        ):
+            continue
+        last_full = IngestionRun.objects.filter(source=source, items_collected__gt=0).order_by(
+            "-pk").first()
+        if last_full is None:
+            continue
+        first_empty = (
+            IngestionRun.objects.filter(source=source, pk__gt=last_full.pk).order_by("pk").first()
+        )
+        out.append((source, first_empty.started_at))
+    return out
