@@ -26,6 +26,7 @@ from .briefing import (
     _cite,
     _first_sentence,
     _sources,
+    collection_outages,
     last_sent_version,
     observation_is_older,
     observation_is_promotional,
@@ -404,6 +405,7 @@ def _search_demand(candidates, sources) -> dict:
     if without:
         parts.append(f"No search data of any kind for: {', '.join(without)}.")
     parts.append(SEARCH_LIMITS)
+    parts.extend(collection_outages())
     return {"heading": "Search demand", "text": "\n\n".join(parts)}
 
 

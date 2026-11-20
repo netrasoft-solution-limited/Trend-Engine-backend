@@ -798,8 +798,34 @@ def coverage_gaps(items) -> str:
                      "is not transcribed.")
     if "reddit" in present:
         lines.append("Reddit's public feed carries no score or comment count, so none is shown.")
+    lines.extend(collection_outages())
     lines.append(SEARCH_LIMITS)
     return " ".join(lines)
+
+
+def collection_outages() -> list[str]:
+    """Channels whose collection has stopped returning anything, from the run
+    records (Mark, 20 Nov: state the Reddit gap accurately while it lasts)."""
+    from apps.ingestion.models import IngestionRun
+    from apps.sources.models import Source
+
+    out = []
+    labels = {"reddit": "Reddit", "tiktok": "TikTok", "instagram": "Instagram"}
+    for platform, label in labels.items():
+        sources = Source.objects.filter(
+            route="social", status=Source.Status.ACTIVE, config__platform=platform
+        )
+        runs = IngestionRun.objects.filter(source__in=sources, status="succeeded")
+        last_full = runs.filter(items_collected__gt=0).order_by("-started_at").first()
+        later = runs.filter(started_at__gt=last_full.started_at) if last_full else runs.none()
+        if last_full and later.exists() and not later.filter(items_collected__gt=0).exists():
+            out.append(
+                f"{label} collection has returned no posts since "
+                f"{later.order_by('started_at').first().started_at:%-d %b %Y} (the provider's "
+                f"collector is failing); {label} posts cited here were collected up to "
+                f"{last_full.started_at:%-d %b %Y}."
+            )
+    return out
 
 
 #: Said wherever a brief describes what search evidence it can and cannot have.
