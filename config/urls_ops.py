@@ -40,6 +40,7 @@ urlpatterns = [
     # The output builder lives in `publication`: its screens drive the gate,
     # and the gate is a layer above `outputs`.
     path("output/", include("apps.publication.urls")),  # Output builder
+    path("cycles/", include("apps.publication.urls_cycles")),  # Research cycles
     path("tenants/", include("apps.billing.urls")),    # Organizations
     path("operations/", include("apps.operations.urls")),  # Operations
 ]

@@ -9,6 +9,7 @@ remember which screen does what.
   <h1>{{ organization.name }}</h1>
   <p class="lede">
     <a href="{% url 'ops-clients' %}">← All clients</a> ·
+    <a href="{% url 'ops-cycle' organization.slug %}"><b>Research cycle →</b></a> ·
     <a href="{% url 'ops-client-contacts' organization.slug %}">Contacts ({{ contacts|length }})</a>
   </p>
 

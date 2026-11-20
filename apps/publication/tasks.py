@@ -58,3 +58,29 @@ def deliver_publication(
         "recipients": len(record.recipients),
         "formats": record.formats,
     }
+
+
+@shared_task(name="apps.publication.tasks.advance_cycle", max_retries=0)
+def advance_cycle(cycle_id: int) -> dict:
+    """Run a research cycle's current stage, then schedule the next call.
+
+    Heavy stages (detection, drafting, discovery) are sent to the `enrich`
+    queue so exports and email on `default` never wait behind them.
+    """
+    from apps.tenancy.context import operator_scope
+
+    from . import cycle as cycles
+    from .models import ResearchCycle
+
+    with operator_scope():
+        current = ResearchCycle.objects.filter(pk=cycle_id).first()
+    if current is None:
+        return {"skipped": "no such cycle"}
+    delay = cycles.advance(current)
+    if delay is not None:
+        queue = "enrich" if current.stage in HEAVY_STAGES else "default"
+        advance_cycle.apply_async(args=[cycle_id], countdown=delay, queue=queue)
+    return {"cycle": cycle_id, "stage": current.stage, "state": current.state, "next": delay}
+
+
+HEAVY_STAGES = {"detect", "recommend", "discover", "search"}

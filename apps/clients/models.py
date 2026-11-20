@@ -237,3 +237,28 @@ class ClientContact(TenantScopedModel):
         # agree without each caller remembering to lower it.
         self.email = (self.email or "").strip().lower()
         return super().save(*args, **kwargs)
+
+
+class BrandSource(TenantScopedModel):
+    """A global source this brand's research cycle collects from.
+
+    Sources are shared evidence (one podcast feed serves every client), so the
+    link lives here, per client. A research cycle polls exactly these
+    (Mark, 20 Nov: one repeatable run per brand).
+    """
+
+    source = models.ForeignKey(
+        "sources.Source", on_delete=models.CASCADE, related_name="brand_links"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+    added_by_label = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "source"], name="uniq_brand_source"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.organization_id} ← {self.source_id}"

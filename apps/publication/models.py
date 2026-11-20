@@ -118,3 +118,36 @@ class Delivery(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.publication_id} to {len(self.recipients)} recipient(s)"
+
+
+class ResearchCycle(TenantScopedModel):
+    """One run of the whole workflow for one brand: fresh collection through
+    to draft briefs (Mark, 20 Nov). Each stage records its state, counts and
+    errors, so the status page shows what happened and what is waiting."""
+
+    class State(models.TextChoices):
+        RUNNING = "running", "Running"
+        REVIEW = "review", "Waiting for review"
+        DONE = "done", "Briefs drafted"
+        FAILED = "failed", "Stopped"
+
+    #: In order. `review` is the one manual stage: approvals by a person.
+    STAGES = ("collect", "process", "detect", "recommend", "discover", "search",
+              "review", "briefs")
+
+    state = models.CharField(max_length=16, choices=State.choices, default=State.RUNNING)
+    stage = models.CharField(max_length=16, default="collect")
+    #: stage name → {"state": waiting|running|done|failed|skipped, "started",
+    #: "finished", "detail", "counts": {...}, "errors": [...]}
+    stages = models.JSONField(default=dict, blank=True)
+    run_ids = models.JSONField(default=list, blank=True)
+    started_by_label = models.CharField(max_length=200, blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    output_version_ids = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+    def __str__(self) -> str:
+        return f"Cycle {self.pk} for {self.organization_id} ({self.state}, {self.stage})"

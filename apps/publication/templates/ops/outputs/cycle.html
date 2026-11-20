@@ -1,0 +1,97 @@
+{% extends "ops/base.html" %}
+{% block title %}Research cycle · {{ organization.name }}{% endblock %}
+{% block content %}
+  <h1>Research cycle · {{ organization.name }}</h1>
+  <p class="lede">
+    One run of the whole workflow: fresh collection from every linked source, relevance,
+    transcripts and claims, stories ranked for {{ organization.name }}, recommendations,
+    new-ingredient discovery and search data. It stops for one manual step, review,
+    then drafts both briefs for export.
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">{% if cycle %}Cycle #{{ cycle.pk }}{% else %}No cycle yet{% endif %}</span>
+      <span class="state">{% if cycle %}{{ cycle.get_state_display }} · started {{ cycle.started_at|date:"j M, H:i" }} UTC by {{ cycle.started_by_label }}{% endif %}</span>
+    </div>
+    {% if cycle %}
+      <div class="stats" style="margin-top:12px">
+        <div class="stat"><b>${{ cost.ai|floatformat:2 }}</b><span>AI cost of this cycle</span></div>
+        <div class="stat"><b>${{ cost.collection|floatformat:2 }}</b><span>collection cost (Virlo, transcripts)</span></div>
+        <div class="stat"><b>{{ cycle.run_ids|length }}</b><span>collection runs</span></div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Stage</th><th>State</th><th>What happened</th></tr></thead>
+          <tbody>
+            {% for s in stages %}
+              <tr{% if s.current %} style="font-weight:600"{% endif %}>
+                <td>{{ s.label }}</td>
+                <td>{% if s.state == "done" %}<span class="pill live">done</span>{% elif s.state == "failed" %}<span class="pill error">failed</span>{% elif s.state == "running" %}<span class="pill">running</span>{% elif s.state == "skipped" %}<span class="pill">skipped</span>{% else %}<span class="muted">waiting</span>{% endif %}</td>
+                <td class="muted">
+                  {{ s.detail }}
+                  {% if s.name == "collect" and s.counts %}
+                    <div>{% for platform, c in s.counts.items %}{{ platform }}: {{ c.new }} new of {{ c.collected }}{% if c.failed %}, <b>{{ c.failed }} failed</b>{% endif %}{% if c.empty %}, {{ c.empty }} empty{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %} · <a href="{% url 'ops-runs' %}">runs →</a></div>
+                  {% endif %}
+                  {% if s.name == "review" and s.counts %}
+                    <ul style="margin:6px 0 0">
+                      {% for r in s.counts.recommendations %}<li><a href="{% url 'ops-signal' organization.slug r.code %}">{{ r.code }}</a> {{ r.title }} — recommendation waiting{% if r.signal_state != "approved" %}, signal {{ r.signal_state }}{% endif %}</li>{% endfor %}
+                      {% for c in s.counts.candidates %}<li><a href="{% url 'ops-candidate' organization.slug c.id %}">{{ c.name }}</a> — candidate waiting for approval</li>{% endfor %}
+                    </ul>
+                    <div>{{ s.counts.approved_stories }} approved stor{{ s.counts.approved_stories|pluralize:"y,ies" }} will be in the trend brief.</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if cycle.state == "review" or cycle.state == "done" %}
+        <form method="post" style="margin-top:12px">{% csrf_token %}
+          <input type="hidden" name="cycle" value="{{ cycle.pk }}">
+          <button type="submit" name="action" value="briefs">Draft both briefs from what is approved</button>
+        </form>
+      {% endif %}
+      {% if versions %}
+        <p style="margin-top:12px">Drafted:
+          {% for v in versions %}<a href="{% url 'ops-output' v.output_id %}">{{ v.output.title }} (v{{ v.number }})</a>{% if not forloop.last %} · {% endif %}{% endfor %}
+        </p>
+      {% endif %}
+    {% endif %}
+    {% if not cycle or cycle.state != "running" %}
+      <form method="post" style="margin-top:12px">{% csrf_token %}
+        <button type="submit" name="action" value="start"{% if cycle %} class="secondary"{% endif %}>Start a research cycle</button>
+        <span class="note">Polls all {{ linked_count }} linked source(s) now; the rest follows automatically.</span>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if history|length > 1 %}
+    <div class="card">
+      <span class="name">Earlier cycles</span>
+      <ul>{% for c in history|slice:"1:" %}<li>#{{ c.pk }} · {{ c.started_at|date:"j M Y, H:i" }} · {{ c.get_state_display }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <details>
+      <summary>Sources linked to {{ organization.name }} ({{ linked_count }})</summary>
+      <form method="post">{% csrf_token %}
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>Source</th><th>Route</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for s in sources %}
+              <tr>
+                <td><input type="checkbox" name="source" value="{{ s.pk }}"{% if s.pk in linked %} checked{% endif %}></td>
+                <td><a href="{% url 'ops-source' s.pk %}">{{ s.name }}</a></td>
+                <td class="muted">{{ s.get_route_display }}{% if s.config.platform %} · {{ s.config.platform }}{% endif %}</td>
+                <td class="muted">{{ s.get_status_display }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table></div>
+        <div class="actions"><button type="submit" name="action" value="sources" class="secondary">Save linked sources</button></div>
+      </form>
+    </details>
+  </div>
+{% endblock %}
