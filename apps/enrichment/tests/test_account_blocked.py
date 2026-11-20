@@ -54,3 +54,30 @@ def test_pending_items_are_not_dispatched_while_blocked():
     cache.set(llm.BLOCKED_KEY, "usage limits", 60)
 
     assert tasks.assess_pending()["dispatched"] == 0
+
+
+# ── 20 Nov reconciliation ───────────────────────────────────────────────────
+
+
+def test_a_cut_off_answer_is_billed_at_its_ceiling():
+    from apps.enrichment.llm.client import LLMTruncated
+    from apps.enrichment.tests.fakes import cut_off
+
+    with pytest.raises(LLMTruncated):
+        ask(FakeTransport([cut_off()]))
+
+    run = ModelRun.objects.get()
+    assert run.output_tokens == gate_tier().max_output_tokens
+
+
+def test_reconciliation_records_the_provider_gap_once():
+    from django.core.management import call_command
+
+    from apps.enrichment.llm import costs
+
+    costs.record(model="claude-haiku-4-5", purpose="t", cost=costs.Decimal("10"), units={})
+    call_command("reconcile_llm_spend", "15.50", "--as-of", "now", "--by", "abu")
+
+    assert costs.spend_this_month() == costs.Decimal("15.50")
+    call_command("reconcile_llm_spend", "15.50", "--as-of", "now", "--by", "abu")
+    assert costs.CostEvent.objects.filter(source_id="provider-reconciliation").count() == 1

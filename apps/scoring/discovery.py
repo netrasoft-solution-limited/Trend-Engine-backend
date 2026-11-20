@@ -124,7 +124,6 @@ def _sold(name: str, catalogue: list[str]) -> bool:
     return any(pattern.search(text) for text in catalogue)
 
 
-@transaction.atomic
 def discover(organization, *, client: LLMClient | None = None,
              actor_label: str = "system") -> list[DiscoveredIngredient]:
     """Propose ingredients for this client from the current window. One call."""
@@ -173,6 +172,15 @@ def discover(organization, *, client: LLMClient | None = None,
 
     proposals.sort(key=lambda p: (-len(p[3]), -len(p[1]), p[0]))
     now = timezone.now()
+    # Only the writes are atomic. The model calls above are not: a call that
+    # fails inside a transaction rolls back its own cost record, and the bill
+    # still arrives (Mark, 20 Nov reconciliation).
+    with transaction.atomic():
+        return _save(organization, proposals, numbered, len(subjects), start, end, now,
+                     actor_label)
+
+
+def _save(organization, proposals, numbered, subject_count, start, end, now, actor_label):
     # One list per run: the previous unassessed proposals are replaced.
     DiscoveredIngredient.objects.filter(
         organization=organization, status=DiscoveredIngredient.Status.NEW
@@ -198,7 +206,7 @@ def discover(organization, *, client: LLMClient | None = None,
         actor_label=actor_label,
         organization=organization,
         message=(
-            f"Discovery read {len(subjects)} subject(s) and proposed {len(found)} "
+            f"Discovery read {subject_count} subject(s) and proposed {len(found)} "
             f"ingredient(s) {organization.name} does not appear to sell."
         ),
         context={"proposed": [d.name for d in found]},

@@ -51,7 +51,9 @@ RATES: dict[str, Rates] = {
     "claude-sonnet-5-5": Rates(
         input=Decimal("2.00"),
         output=Decimal("10.00"),
-        cache_read=Decimal("0.20"),
+        # Published at $0.10 for Sonnet 5.5 (checked 20 Nov); was carried at
+        # the generic 0.1x of an older rate.
+        cache_read=Decimal("0.10"),
         cache_write=Decimal("2.50"),
     ),
     # Strong tier — client-facing drafting only (Arch §10.3).

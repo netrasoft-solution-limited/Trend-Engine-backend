@@ -260,7 +260,12 @@ class LLMClient:
                     f"{CUT_OFF if truncated else 'Answer did not match the schema'} after "
                     f"{len(answer):,} characters (tokens estimated). {str(exc)[:1500]}"
                 ),
-                input_tokens=approx_input, output_tokens=len(answer) // 4,
+                input_tokens=approx_input,
+                # A cut-off answer used the whole ceiling, thinking included,
+                # and is billed for it; the visible text is only part of that.
+                # Counting the characters understated these calls (Mark,
+                # 20 Nov reconciliation).
+                output_tokens=tier.max_output_tokens if truncated else len(answer) // 4,
             )
             raise (LLMTruncated if truncated else LLMInvalidOutput)(
                 f"{purpose}: the answer {'was cut off' if truncated else 'was not schema-valid'} "
