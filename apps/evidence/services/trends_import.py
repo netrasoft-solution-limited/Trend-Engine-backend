@@ -158,7 +158,8 @@ def parse(text: str) -> list[Reading]:
 
 
 @transaction.atomic
-def save(readings: list[Reading], *, entered_by: str, batch: str = "") -> list[Observation]:
+def save(readings: list[Reading], *, entered_by: str, batch: str = "",
+         provider: str = PROVIDER, provenance: str = "") -> list[Observation]:
     """One google_trends observation per term, retrieved today."""
     today = timezone.localdate()
     batch = batch or f"trends-{today:%Y%m%d}"
@@ -180,7 +181,7 @@ def save(readings: list[Reading], *, entered_by: str, batch: str = "") -> list[O
             metric_value=Decimal(f"{r.current:.2f}"),
             metric_label=r.label,
             query=r.term,
-            provider=PROVIDER,
+            provider=provider,
             geography=r.geography,
             period=r.period,
             limitations=LIMITATIONS.format(days=PERIOD_DAYS)
@@ -188,6 +189,6 @@ def save(readings: list[Reading], *, entered_by: str, batch: str = "") -> list[O
                if len(terms) > 1 else ""),
             entered_by=entered_by,
             import_batch=batch,
-            provenance=f"Google Trends export imported {today:%-d %b %Y}",
+            provenance=provenance or f"Google Trends export imported {today:%-d %b %Y}",
         ))
     return created

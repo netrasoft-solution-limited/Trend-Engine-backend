@@ -38,6 +38,7 @@ CREDENTIAL_FIELDS: dict[str, tuple[str, ...]] = {
     AcquisitionProvider.Kind.APIFY: ("api_key",),
     AcquisitionProvider.Kind.ASSEMBLYAI: ("api_key",),
     AcquisitionProvider.Kind.TADDY: ("api_key", "user_id"),
+    AcquisitionProvider.Kind.DATAFORSEO: ("login", "password"),
     AcquisitionProvider.Kind.NCBI: ("api_key",),
     AcquisitionProvider.Kind.CROSSREF: ("api_key",),
 }

@@ -195,7 +195,11 @@ def attach(candidate: Candidate, ids: list[int], *, actor_label: str) -> tuple[l
         found.append(o)
     candidate.observations.add(*found)
     attached = [o.pk for o in found]
-    if attached and _unapprove(candidate):
+    # A refreshed search reading updates figures the case already shows with
+    # their dates; it is not new argument, so approval stands. Anything else
+    # attached withdraws it, as any change to the evidence does.
+    substantive = [o for o in found if o.source_type not in SEARCH_SOURCE_TYPES]
+    if substantive and _unapprove(candidate):
         candidate.save(update_fields=["approved_at", "approved_by_label", "updated_at"])
     if attached:
         _audit(candidate.organization, actor_label,

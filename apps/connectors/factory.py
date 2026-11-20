@@ -121,3 +121,13 @@ def virlo_for(source: Source, *, max_calls: int = 0) -> VirloConnector:
         api_key=_credential(provider),
         max_calls=max_calls,
     )
+
+
+def dataforseo_for():
+    """Search volumes and Trends. Both secrets resolved before construction."""
+    from .providers.dataforseo import DataForSeo
+
+    provider = _provider(AcquisitionProvider.Kind.DATAFORSEO)
+    return DataForSeo(
+        login=_credential(provider, "login"), password=_credential(provider, "password")
+    )

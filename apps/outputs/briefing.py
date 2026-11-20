@@ -37,7 +37,7 @@ from apps.clients.models import ClientAsset
 from apps.enrichment.models import CORRECTION_NOTE, Claim
 from apps.evidence.models import ContentItem, TranscriptArtifact
 from apps.intelligence.models import Signal, SignalEvidence
-from apps.scoring import benchmark, story_kind
+from apps.scoring import benchmark, search_data, story_kind
 from apps.scoring.models import ClientSignalScore, Recommendation
 
 from .models import Output, OutputState, OutputType
@@ -579,6 +579,12 @@ def _development(organization, development: Development, sources) -> dict:
     if rec.limits:
         parts.append(f"What this does not prove. {client_facing(rec.limits)}")
     parts.append(_strength(signal))
+    searched = search_data.story_readings(signal, organization)
+    if searched:
+        parts.append("Search demand:\n" + "\n".join(
+            f"· {observation_line(o, sources)}" for o in searched))
+    else:
+        parts.append("Search demand: no search reading yet for the terms this story matched.")
     brand = []
     for link in signal.observations.select_related("observation").order_by("added_at"):
         line = observation_line(link.observation, sources)

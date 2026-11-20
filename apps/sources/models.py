@@ -143,6 +143,8 @@ class AcquisitionProvider(models.Model):
         APIFY = "apify", "Apify"
         ASSEMBLYAI = "assemblyai", "AssemblyAI"
         VIRLO = "virlo", "Virlo"
+        #: Google search volumes and Google Trends (Mark, 20 Nov).
+        DATAFORSEO = "dataforseo", "DataForSEO"
         NCBI = "ncbi", "NCBI E-utilities"
         CROSSREF = "crossref", "Crossref"
         RSS = "rss", "Direct RSS"
@@ -240,6 +242,8 @@ _ENV_OVERRIDES: dict[tuple[str, str], str] = {
     ("assemblyai", "api_key"): "ASSEMBLYAI_API_KEY",
     ("taddy", "api_key"): "TADDY_API_KEY",
     ("taddy", "user_id"): "TADDY_USER_ID",
+    ("dataforseo", "login"): "DATAFORSEO_LOGIN",
+    ("dataforseo", "password"): "DATAFORSEO_PASSWORD",
 }
 
 
