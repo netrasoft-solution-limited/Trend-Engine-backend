@@ -37,7 +37,7 @@ from apps.clients.models import ClientAsset
 from apps.enrichment.models import CORRECTION_NOTE, Claim
 from apps.evidence.models import ContentItem, TranscriptArtifact
 from apps.intelligence.models import Signal, SignalEvidence
-from apps.scoring import benchmark
+from apps.scoring import benchmark, story_kind
 from apps.scoring.models import ClientSignalScore, Recommendation
 
 from .models import Output, OutputState, OutputType
@@ -312,6 +312,7 @@ def _decision_summary(organization, developments, leads, watched, sources) -> di
         lines = [
             f"{n}. {d.signal.title}",
             f"· Status: {d.signal.get_maturity_display()}. {status_counts(d.signal)}",
+            f"· Type: {story_kind.for_recommendation(rec).sentence()}",
             f"· What changed: {_first_sentence(d.signal.statement)}",
             f"· Strongest evidence: {lead[0] if lead else 'see Appendix A.'}",
             f"· {organization.name} products: {products}",
@@ -565,6 +566,7 @@ def _development(organization, development: Development, sources) -> dict:
 
     parts = [
         f"Status. {status_sentence(signal)}",
+        f"Type. {story_kind.for_recommendation(rec).sentence()}",
         f"What changed. {signal.statement}",
     ]
     parts.append(f"Why it matters to {organization.name}. {client_facing(rec.why_it_matters)}")

@@ -14,7 +14,7 @@ import re
 from collections import OrderedDict
 
 from apps.evidence.models import Observation
-from apps.scoring import opportunities
+from apps.scoring import opportunities, story_kind
 from apps.scoring.models import Candidate
 
 from .briefing import (
@@ -259,6 +259,7 @@ def _summary(organization, candidates, note, sources) -> dict:
         beside = f" It would sit beside {', '.join(c.adjacent)}." if c.adjacent else ""
         blocks.append("\n".join([
             f"{n}. {c.name}: {c.get_status_display().lower()}",
+            f"· Type: {story_kind.for_candidate(c).sentence()}",
             "· Current evidence: "
             + (", ".join(f"{ch.lower()} {counts[ch]['current']}" for ch in present
                          if ch != "Search") or "no")
