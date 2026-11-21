@@ -92,6 +92,9 @@ def advance(cycle: ResearchCycle) -> int | None:
     record = cycle.stages.setdefault(name, {})
     if record.get("state") in (None, "waiting"):
         record.update(state="running", started=timezone.now().isoformat())
+        # Saved before the stage runs: detection takes minutes, and the page
+        # should say "running" while it does.
+        cycle.save(update_fields=["stages"])
     try:
         result = STAGE_FUNCTIONS[name](cycle, record)
     except Wait as wait:
