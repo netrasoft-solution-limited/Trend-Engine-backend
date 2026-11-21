@@ -949,9 +949,14 @@ _STOP = {"about", "across", "with", "from", "their", "there", "these", "those", 
 def quote_quality(claim: Claim, signal: Signal) -> int:
     """How well a claim stands for its story: it names the story's subject, it
     cites a study, it was said in a podcast or video, and it is not hype."""
-    text = f"{claim.quote or claim.text} {claim.subject}".lower()
-    keys = {w for w in re.findall(r"[a-z][a-z0-9-]{4,}", signal.title.lower())} - _STOP
-    relevant = sum(1 for w in keys if w in text)
+    # The quote itself must name the subject: a claim filed under "vitamin D3
+    # and K2" whose words are "unsexy supplements with strong longevity data"
+    # reads as off-topic to a client (21 Nov).
+    text = (claim.quote or claim.text or "").lower()
+    title = signal.title.lower()
+    keys = ({w for w in re.findall(r"[a-z][a-z0-9-]{4,}", title)} - _STOP) | set(
+        re.findall(r"\b[a-z]{1,4}\d{1,4}\b|\b\d+[a-z]{1,3}\b", title))
+    relevant = sum(1 for w in keys if re.search(rf"(?<![a-z0-9]){re.escape(w)}", text))
     quote = (claim.quote or claim.text or "").strip()
     return (
         3 * min(relevant, 2)
