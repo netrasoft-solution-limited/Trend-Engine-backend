@@ -37,4 +37,12 @@ def test_otherwise_it_supports_an_existing_product(jarrow):
     found = kind(jarrow, "Magnesium glycinate before bed", ["Magnesium Glycinate", "MagMind"])
 
     assert found.kind == story_kind.EXISTING
-    assert found.sentence() == "Existing product: supports Magnesium Glycinate, MagMind."
+    # MagMind (threonate) is matched but not what this story is about.
+    assert found.sentence() == "Existing product: supports Magnesium Glycinate."
+
+
+def test_listings_the_story_does_not_name_are_only_the_nearest(jarrow):
+    found = kind(jarrow, "Urolithin A comes from gut bacteria", ["Magnesium Glycinate"])
+
+    assert found.kind == story_kind.GAP
+    assert "nearest listings: Magnesium Glycinate" in found.reason

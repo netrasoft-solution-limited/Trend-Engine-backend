@@ -91,6 +91,19 @@ def classify(organization, *, text: str, listings: list[str]) -> Kind:
     if not matched:
         return Kind(GAP, "no listing in the current catalogue matches it.")
 
+    # A listing supports the story only if the story names it or one of its
+    # terms. Otherwise it is the nearest thing the brand sells, and the story
+    # is about something it does not (21 Nov: urolithin A was mapped to the
+    # probiotics and labelled an existing product).
+    direct = [a for a in matched if _words(text, _key_words(a))]
+    if not direct:
+        return Kind(
+            GAP,
+            f"the story is about something the catalogue does not sell; nearest listings: "
+            f"{_names([a.name for a in matched])}.",
+            [a.name for a in matched],
+        )
+    matched = direct
     names = [a.name for a in matched]
     for form, words in FORMATS.items():
         said = _words(text, words)
@@ -136,6 +149,20 @@ def for_candidate(candidate) -> Kind:
         text=f"{candidate.name} {candidate.opening} {candidate.why_it_matters}",
         listings=found,
     )
+
+
+#: Words in listing names that say nothing about what the listing is.
+GENERIC = {"supplement", "supplements", "capsules", "capsule", "veggie", "tablets", "tablet",
+           "formula", "complex", "advanced", "ultra", "sustain", "billion", "refrigerated",
+           "refrigeratred", "softgels", "jarrow", "formulas", "health", "support", "pack"}
+
+
+def _key_words(asset: ClientAsset) -> list[str]:
+    """The words that identify a listing: its terms, and the distinctive words
+    (five letters or more) of its name and terms."""
+    phrases = [asset.name.lower(), *[t.lower() for t in asset.terms]]
+    words = {w for p in phrases for w in re.findall(r"[a-z][a-z0-9-]{4,}", p)} - GENERIC
+    return [*phrases, *sorted(words)]
 
 
 def _names(names: list[str]) -> str:
