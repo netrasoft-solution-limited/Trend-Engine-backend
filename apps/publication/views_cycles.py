@@ -19,7 +19,7 @@ from apps.tenancy.context import scoped
 
 from . import cycle as cycles
 from .models import ResearchCycle
-from .tasks import advance_cycle
+from .tasks import advance_cycle, draft_cycle_briefs
 
 STAGE_LABELS = {
     "collect": "Collect fresh research",
@@ -82,12 +82,12 @@ class CycleView(View):
             elif action == "briefs":
                 current = get_object_or_404(ResearchCycle, organization=organization,
                                             pk=int(request.POST.get("cycle") or 0))
-                made = cycles.briefs(current, actor_label=_actor(request))
-                if made:
-                    messages.success(request, f"{len(made)} brief(s) drafted. Open them below "
-                                              "to read, export and send for review.")
-                else:
-                    messages.error(request, current.stages["briefs"].get("detail", ""))
+                current.stages.setdefault("briefs", {}).update(
+                    state="running", detail="Drafting both briefs, with their written summary.")
+                current.save(update_fields=["stages"])
+                draft_cycle_briefs.apply_async(args=[current.pk, _actor(request)], queue="enrich")
+                messages.info(request, "Drafting both briefs. This takes a minute or two; "
+                                       "refresh this page to see them.")
             elif action == "sources":
                 chosen = {int(x) for x in request.POST.getlist("source")}
                 BrandSource.objects.filter(organization=organization).exclude(

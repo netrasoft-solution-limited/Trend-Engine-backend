@@ -188,3 +188,24 @@ def test_the_page_starts_a_cycle_and_links_sources(client, admin, real_client, l
     client.post(url, {"action": "start"})
     page = client.get(url).content.decode()
     assert "Cycle #" in page and "Collect fresh research" in page
+
+
+
+def test_drafting_briefs_runs_in_the_background(client, admin, real_client, linked, monkeypatch):
+    from apps.publication import views_cycles
+
+    queued = []
+    monkeypatch.setattr(views_cycles.draft_cycle_briefs, "apply_async",
+                        lambda args, queue: queued.append((args, queue)))
+    cycle = started(real_client)
+    cycle.state = ResearchCycle.State.REVIEW
+    cycle.save()
+    client.force_login(admin)
+
+    client.post(reverse("ops-cycle", args=[real_client.slug]),
+                {"action": "briefs", "cycle": cycle.pk})
+
+    assert queued == [([cycle.pk, admin.email], "enrich")]
+    with scoped(real_client):
+        cycle.refresh_from_db()
+    assert cycle.stages["briefs"]["state"] == "running"

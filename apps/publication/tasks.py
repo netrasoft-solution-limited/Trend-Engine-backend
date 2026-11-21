@@ -84,3 +84,21 @@ def advance_cycle(cycle_id: int) -> dict:
 
 
 HEAVY_STAGES = {"detect", "recommend", "discover", "search"}
+
+
+@shared_task(name="apps.publication.tasks.draft_cycle_briefs", max_retries=0)
+def draft_cycle_briefs(cycle_id: int, actor_label: str) -> dict:
+    """Draft both briefs for a cycle. In a task, not the request: the written
+    prose is two model calls and outlived the web worker's timeout (21 Nov)."""
+    from apps.tenancy.context import operator_scope, scoped
+
+    from . import cycle as cycles
+    from .models import ResearchCycle
+
+    with operator_scope():
+        current = ResearchCycle.objects.select_related("organization").filter(pk=cycle_id).first()
+    if current is None:
+        return {"skipped": "no such cycle"}
+    with scoped(current.organization):
+        made = cycles.briefs(current, actor_label=actor_label)
+    return {"cycle": cycle_id, "versions": made}

@@ -46,7 +46,9 @@
           </tbody>
         </table>
       </div>
-      {% if cycle.state == "review" or cycle.state == "done" %}
+      {% if cycle.stages.briefs.state == "running" %}
+        <p class="note" style="margin-top:12px">Drafting both briefs… refresh in a minute.</p>
+      {% elif cycle.state == "review" or cycle.state == "done" %}
         <form method="post" style="margin-top:12px">{% csrf_token %}
           <input type="hidden" name="cycle" value="{{ cycle.pk }}">
           <button type="submit" name="action" value="briefs">Draft both briefs from what is approved</button>
