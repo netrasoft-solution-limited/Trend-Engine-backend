@@ -754,3 +754,21 @@ def test_denying_a_trend_is_not_claiming_one():
     assert status_conflicts(text, Signal.Maturity.RECURRING) == []
     assert status_conflicts({"why_it_matters": "A rising trend.", "actions": []},
                             Signal.Maturity.RECURRING) == ["A rising trend"]
+
+
+def test_the_lead_quote_names_the_story_and_hype_comes_last(jarrow, approved, evidence):
+    from types import SimpleNamespace
+
+    signal, _ = evidence
+    item = SimpleNamespace(platform="tiktok")
+    on_topic = SimpleNamespace(quote="Magnesium glycinate before bed helped my sleep",
+                               text="", subject="", is_cited=False, content_item=item)
+    hype = SimpleNamespace(quote="This magnesium will wipe out your stress instantly",
+                           text="", subject="", is_cited=False, content_item=item)
+
+    assert briefing.quote_quality(on_topic, signal) > briefing.quote_quality(hype, signal)
+
+
+def test_pictographs_are_removed_from_exported_titles():
+    title = "I won't age (SAVE THIS) \U0001F9EC - #3"
+    assert briefing._label(title) == "I won't age (SAVE THIS) - #3"

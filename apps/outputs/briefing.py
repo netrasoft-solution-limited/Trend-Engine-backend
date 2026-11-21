@@ -908,6 +908,10 @@ def _evidence(signal: Signal, sources: OrderedDict) -> tuple[list[str], list[str
         for row in rows if row.role == SignalEvidence.Role.CONTRADICTS
     ][:DISSENT_PER_DEVELOPMENT]
     backing = [row.claim for row in rows if row.role != SignalEvidence.Role.CONTRADICTS]
+    # Best first, so the first quote is the one a reader should see (21 Nov: a
+    # D3/K2 story led with a urolithin A line, and the cold-season story with
+    # "wipe out your sickness in a blink of an eye").
+    backing.sort(key=lambda c: -quote_quality(c, signal))
     # Current material before older; then one quote per channel before a second
     # from any, so a podcast is not crowded out by five newer TikToks (Mark,
     # 15 Nov); and one quote per item, so five quotes are five voices.
@@ -928,6 +932,34 @@ def _evidence(signal: Signal, sources: OrderedDict) -> tuple[list[str], list[str
             chosen.append(claim)
     supporting = [quote_line(c, sources) for c in chosen[:EVIDENCE_PER_DEVELOPMENT]]
     return supporting, dissent
+
+
+#: Marketing hype: a quote like this shows what is being promised, not evidence.
+HYPE = re.compile(
+    r"\b(?:wipe[sd]? out|miracle|cures?|blink of an eye|game[- ]changer|life[- ]changing|"
+    r"obsessed|must[- ]have|holy grail|link in (?:my )?bio|you need (?:this|these)|"
+    r"best (?:supplement|thing) ever|instantly|overnight)\b",
+    re.IGNORECASE,
+)
+_STOP = {"about", "across", "with", "from", "their", "there", "these", "those", "which",
+         "while", "where", "versus", "pushed", "items", "sources", "recurs", "surface",
+         "promoted", "people", "reports", "claims"}
+
+
+def quote_quality(claim: Claim, signal: Signal) -> int:
+    """How well a claim stands for its story: it names the story's subject, it
+    cites a study, it was said in a podcast or video, and it is not hype."""
+    text = f"{claim.quote or claim.text} {claim.subject}".lower()
+    keys = {w for w in re.findall(r"[a-z][a-z0-9-]{4,}", signal.title.lower())} - _STOP
+    relevant = sum(1 for w in keys if w in text)
+    quote = (claim.quote or claim.text or "").strip()
+    return (
+        3 * min(relevant, 2)
+        + (2 if claim.is_cited else 0)
+        + (1 if claim.content_item.platform in ("podcast", "youtube") else 0)
+        + (1 if 40 <= len(quote) <= 260 else 0)
+        - (4 if HYPE.search(quote) else 0)
+    )
 
 
 def _cite(sources: OrderedDict, key: tuple, obj) -> int:
@@ -951,7 +983,7 @@ def quote_line(claim: Claim, sources: OrderedDict | None = None) -> str:
         # A post, a caption or a Virlo transcript has no timings: "at 0:00"
         # would point the reader at a moment nobody measured.
         seconds = None
-    quote = claim.shown_quote.strip()
+    quote = plain(claim.shown_quote)
     if len(quote) > QUOTE_CHARS:
         quote = quote[: QUOTE_CHARS - 1].rsplit(" ", 1)[0] + "…"
     who = item.creator or item.source.name
@@ -1084,9 +1116,18 @@ def _possessive(name: str) -> str:
     return f"{name}'" if name.endswith("s") else f"{name}'s"
 
 
+#: Emoji and pictographs: the export fonts have no glyphs for them, and they
+#: printed as empty boxes in the 21 Nov PDF.
+_PICTOGRAPHS = re.compile("[\U0001F000-\U0010FFFF\u2600-\u27BF\uFE0F\u200D\uFFFC]")
+
+
+def plain(text: str) -> str:
+    return re.sub(r"[ \t]{2,}", " ", _PICTOGRAPHS.sub("", text or "")).strip()
+
+
 def _label(title: str) -> str:
     """A title safe inside link syntax: brackets would end the label early."""
-    return (title or "untitled").replace("[", "(").replace("]", ")")
+    return plain(title or "untitled").replace("[", "(").replace("]", ")") or "untitled"
 
 
 def _timestamp(seconds: float) -> str:
