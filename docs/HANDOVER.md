@@ -1,6 +1,6 @@
 # Trend Engine — handover
 
-Current as of 21 October 2026. Everything needed to run, deploy, restore and
+Current as of 21 November 2026. Everything needed to run, deploy, restore and
 continue this system without the original developer. Credentials are never
 written here; section 7 says where each one lives.
 
@@ -31,6 +31,29 @@ Compose project `~/trend-engine/backend/deploy`:
 | `redis` | Celery broker |
 | `frontend` | One-shot build of the portal assets into a volume; exiting with code 0 is normal |
 
+## 2a. The monthly workflow: research cycles
+
+Each brand's work runs from its research cycle page, `/cycles/<slug>/`:
+`apps/publication/cycle.py`, with the page in `views_cycles.py`.
+
+1. Link the brand's sources on that page (the `BrandSource` model).
+2. Click "Start a research cycle". It runs these stages:
+   - collect
+   - process (relevance, transcripts, extraction)
+   - detect and rank
+   - recommend
+   - discover (with candidate evidence)
+   - search (DataForSEO, once its keys are set)
+   - review: the one manual stage
+3. After review, click "Draft both briefs". The briefs open in the Output builder for export and "Send for review".
+
+Each stage records its state, counts and errors. A failed stage stops the cycle and says why. Every failed or empty source is listed by platform, and the cycle's AI and collection cost is shown.
+
+The task `apps.publication.tasks.advance_cycle` drives the stages:
+- It reschedules itself while a stage is waiting.
+- Heavy stages run on the `enrich` queue.
+- The `process` stage gives up after 2 hours, and leaves what is still unfinished for the next cycle.
+
 ## 3. Local setup
 
 ```
@@ -60,6 +83,17 @@ cd deploy && docker compose build                        # 3. images
 docker compose run --rm --no-deps web-ops python manage.py migrate   # 4. migrations (NOT run on start)
 docker compose up -d                                     # 5. restart
 ```
+
+For an app-only change, list the six Django services by name in both `build` and `up -d --no-deps`:
+
+```
+web-ops web-portal worker-ingest worker-enrich worker-default beat
+```
+
+This keeps caddy, postgres and redis from being recreated.
+
+- Keep the MPTCP mitigation: `/proc/sys/net/mptcp/enabled` must read 0.
+- Deploy only when the queues are idle (`celery -A config inspect active` on each worker), or when a running cycle can wait.
 
 ## 5. Scheduled jobs (Celery beat, `config/celery.py`)
 
@@ -92,7 +126,9 @@ Values are never in the repository or this document.
 |---|---|---|
 | Anthropic | relevance screening, extraction, detection, recommendations, content drafting | `LLM_API_KEY` in the server's `deploy/.env` |
 | Taddy | podcast discovery and transcripts | stored encrypted in the database (Vendor keys screen); fallback `TADDY_*` in `deploy/.env` |
-| Apify | YouTube collection | as Taddy (`APIFY_TOKEN`) |
+| Apify | YouTube collection; Reddit (actor failing since 15 Nov) | as Taddy (`APIFY_TOKEN`) |
+| Virlo | TikTok and Instagram search, transcripts, captions and comments | Vendor keys screen; monthly cap on the provider row |
+| DataForSEO | Google search volumes and Google Trends | Vendor keys screen (`login`, `password`); not yet set |
 | AssemblyAI | audio transcription fallback | as Taddy (`ASSEMBLYAI_API_KEY`) |
 | Resend | outgoing email | `RESEND_API_KEY` in `deploy/.env` |
 | Database | — | `POSTGRES_*` in `deploy/.env` |
@@ -116,6 +152,32 @@ All pass at the deployed commit. The AI layer is tested against a fake transport
 no test spends money or needs a key.
 
 ## 9. Known defects and unfinished work
+
+Status at 21 Nov 2026. The plan is in `docs/DELIVERY-PLAN-2026-12.md`.
+
+**Reddit**
+- Collection has returned no posts since 15 Nov: the Apify actor fails silently.
+- The alternatives need a decision from Pure Play: Reddit's official API, or a dedicated Reddit account for an actor that needs a login session.
+- Until then, the briefs state the gap with its dates.
+
+**Search data**
+- The DataForSEO connector is built and tested; it waits for an account.
+- Google Trends refuses automated requests from the server, so until the account exists, readings come from the CSV import (Observations page).
+
+**AI spend**
+- The Anthropic workspace showed about $15 more spend than the ledger before 20 Nov.
+- Today's calls reconcile; the earlier gap needs the console's usage export.
+- `manage.py reconcile_llm_spend <provider total> --as-of … --by …` records the gap as one adjustment.
+
+**Second brand**
+- Onboarding needs a catalogue with listening families.
+- `convert_catalogue` and `client_profile load` work from a CSV.
+- Storefront reading drafts a profile but does not assign families.
+- Sources per family are created with `social_sources` (command line).
+- A guided page is planned.
+
+**Extraction**
+- An item that produced no claims can be extracted twice if it is dispatched twice.
 
 - `README.md` (both repos) lags the code: its "not built yet" lists predate the
   connectors, signals, ranking, screens and exports. This document and the code win.
