@@ -81,3 +81,19 @@ def test_reconciliation_records_the_provider_gap_once():
     assert costs.spend_this_month() == costs.Decimal("15.50")
     call_command("reconcile_llm_spend", "15.50", "--as-of", "now", "--by", "abu")
     assert costs.CostEvent.objects.filter(source_id="provider-reconciliation").count() == 1
+
+
+def test_an_item_read_once_with_nothing_to_extract_is_not_paid_for_again():
+    from apps.enrichment import extraction
+    from apps.evidence.models import ContentItem
+    from apps.sources.models import Source
+
+    source = Source.objects.create(name="s", route="podcast")
+    item = ContentItem.objects.create(source=source, external_id="x", title="t", content_hash="x",
+                                      content_state="transcribed")
+    ModelRun.objects.create(purpose="extraction", outcome="succeeded", model="m",
+                            prompt_version="v", content_item=item)
+
+    result = extraction.extract(item, domain_pack="d")
+
+    assert result.skipped == "already extracted; nothing to extract"

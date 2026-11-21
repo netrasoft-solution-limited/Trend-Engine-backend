@@ -34,7 +34,7 @@ from .llm.client import (
     extraction_tier,
 )
 from .llm.costs import CostCapExceeded
-from .models import Claim, Question
+from .models import Claim, ModelRun, Question
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +251,12 @@ def extract(
         return ExtractionResult(
             item.claims.count(), item.questions.count(), 0, skipped="already extracted"
         )
+    if ModelRun.objects.filter(
+        content_item=item, purpose=ModelRun.Purpose.EXTRACTION, outcome=ModelRun.Outcome.SUCCEEDED
+    ).exists():
+        # Read before and found nothing to extract: a second dispatch would pay
+        # for the same empty answer (20 Nov: the backlog was dispatched twice).
+        return ExtractionResult(0, 0, 0, skipped="already extracted; nothing to extract")
 
     segments = build_segments(item)
     if not segments:
