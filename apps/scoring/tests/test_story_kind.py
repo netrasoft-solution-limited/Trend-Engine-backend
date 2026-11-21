@@ -46,3 +46,12 @@ def test_listings_the_story_does_not_name_are_only_the_nearest(jarrow):
 
     assert found.kind == story_kind.GAP
     assert "nearest listings: Magnesium Glycinate" in found.reason
+
+
+def test_a_group_named_only_in_passing_does_not_make_a_new_audience(jarrow):
+    with scoped(jarrow):
+        found = story_kind.classify(
+            jarrow, text="Magnesium glycinate formats; one post pitched it to kids",
+            listings=["Magnesium Glycinate"], title="Magnesium glycinate formats")
+
+    assert found.kind == story_kind.EXISTING

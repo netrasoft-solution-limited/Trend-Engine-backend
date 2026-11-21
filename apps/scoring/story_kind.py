@@ -83,8 +83,11 @@ def _listing_text(asset: ClientAsset) -> str:
     return f"{asset.name} {' '.join(asset.terms)} {asset.notes}"
 
 
-def classify(organization, *, text: str, listings: list[str]) -> Kind:
-    """`text` is what the story says; `listings` the catalogue names it matched."""
+def classify(organization, *, text: str, listings: list[str], title: str | None = None) -> Kind:
+    """`text` is what the story says; `listings` the catalogue names it matched.
+    The audience is read from `title` when given: a group named once as an
+    example in a long statement is not what the story is about (21 Nov: the
+    gummy-formats story was labelled a new audience for one GLP-1 mention)."""
     catalogue = _catalogue(organization)
     by_name = {a.name: a for a in catalogue}
     matched = [by_name[n] for n in listings if n in by_name]
@@ -116,7 +119,7 @@ def classify(organization, *, text: str, listings: list[str]) -> Kind:
             )
 
     for group, words in AUDIENCES.items():
-        said = _words(text, words)
+        said = _words(title if title is not None else text, words)
         if said and not any(_words(_listing_text(a), words) for a in catalogue):
             return Kind(
                 AUDIENCE,
@@ -134,6 +137,7 @@ def for_recommendation(recommendation) -> Kind:
         recommendation.organization,
         text=f"{signal.title} {signal.statement}",
         listings=list(recommendation.products or []),
+        title=signal.title,
     )
 
 
