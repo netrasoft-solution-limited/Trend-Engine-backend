@@ -270,6 +270,11 @@ TREND_WORDS = re.compile(
 )
 
 
+#: Words just before a trend phrase that deny it.
+NEGATED = re.compile(r"(?:\bnot(?:\s+yet)?|n't|\bno longer|\brather than|\bnor|\bneither)\s+"
+                     r"(?:\w+\s+){0,2}$", re.IGNORECASE)
+
+
 def status_conflicts(content: dict, maturity: str) -> list[str]:
     """Phrases in the prose that claim a trend the status does not support."""
     if maturity == Signal.Maturity.MEASURED_TREND:
@@ -280,6 +285,10 @@ def status_conflicts(content: dict, maturity: str) -> list[str]:
     found = []
     for text in texts:
         for match in TREND_WORDS.finditer(text):
+            if NEGATED.search(text[max(0, match.start() - 25):match.start()]):
+                # "a recurring discussion, not a measured trend" is the rule
+                # followed, not broken (21 Nov: four drafts refused for it).
+                continue
             phrase = match.group(0).strip()
             if phrase.lower() not in (f.lower() for f in found):
                 found.append(phrase)

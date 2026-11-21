@@ -742,3 +742,15 @@ def test_a_corrected_transcription_shows_in_brackets_and_says_so(jarrow, approve
     assert "improves sleep in [adults over 65]" in body
     assert "Transcription corrected in brackets." in body
     assert "[adults over 65]" in copy.excerpt and "corrected in brackets" in copy.limitations
+
+
+def test_denying_a_trend_is_not_claiming_one():
+    from apps.scoring.recommendations import status_conflicts
+
+    text = {"why_it_matters": "This is a recurring discussion, not a measured trend. It isn't "
+                              "a rising trend yet, rather than a trend it is a theme.",
+            "actions": []}
+
+    assert status_conflicts(text, Signal.Maturity.RECURRING) == []
+    assert status_conflicts({"why_it_matters": "A rising trend.", "actions": []},
+                            Signal.Maturity.RECURRING) == ["A rising trend"]
