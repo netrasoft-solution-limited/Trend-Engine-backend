@@ -30,6 +30,7 @@ together anyway.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 from django.db import transaction
@@ -102,6 +103,13 @@ class DiscoveredProfile(BaseModel):
 VALID_KINDS = {choice for choice, _label in ClientAsset.Kind.choices}
 
 
+def catalogue_tier() -> llm.Tier:
+    """The extraction model with room for a large range. 8,000 tokens held a
+    70-product catalogue; Nature's Way's 248 products were cut off at 13,000
+    characters (22 Nov). Once per client, so the ceiling costs at most ~$0.20."""
+    return dataclasses.replace(llm.extraction_tier(), max_output_tokens=20000)
+
+
 def interpret(products: list[catalogue_reader.Product], *, transport=None) -> DiscoveredProfile:
     """Catalogue in, draft profile shape out. Writes nothing."""
     if not products:
@@ -117,7 +125,7 @@ def interpret(products: list[catalogue_reader.Product], *, transport=None) -> Di
         # like a model that returns malformed output rather than a budget set
         # too low. This runs once per client at onboarding, so the better model
         # costs a few cents against a profile every later brief depends on.
-        tier=llm.extraction_tier(),
+        tier=catalogue_tier(),
         purpose="client_profile_discovery",
         prompt_version=PROMPT_VERSION,
         # The instructions are stable across every client and the catalogue is

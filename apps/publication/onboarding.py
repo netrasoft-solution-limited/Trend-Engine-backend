@@ -18,6 +18,7 @@ on the brand's setup page with its state:
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 from django.db import transaction
@@ -153,7 +154,7 @@ def assign_families(organization, *, actor_label: str, client=None) -> dict:
                          for n, a in enumerate(listings, start=1))
     answer = (client or LLMClient()).structured(
         schema=Families,
-        tier=extraction_tier(),
+        tier=dataclasses.replace(extraction_tier(), max_output_tokens=16000),
         purpose=ModelRun.Purpose.DISCOVERY,
         prompt_version=PROMPT_VERSION,
         system=cached_system(INSTRUCTIONS),

@@ -442,3 +442,8 @@ def test_a_mostly_successful_crawl_still_returns_what_it_found():
     products = catalogue.read("https://brand.example", transport=transport_for(pages))
 
     assert sorted(p.name for p in products) == ["Alpha", "Beta"]
+
+
+def test_a_large_catalogue_has_room_to_be_answered():
+    # 22 Nov: Nature's Way's 248 products were cut off under the 8,000 ceiling.
+    assert discovery.catalogue_tier().max_output_tokens >= 20000
