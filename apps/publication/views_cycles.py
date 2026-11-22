@@ -100,3 +100,44 @@ class CycleView(View):
                 messages.success(request, f"{len(chosen)} source(s) linked to "
                                           f"{organization.name}.")
         return back
+
+
+class SetupView(View):
+    """The checklist for making a new brand ready for its first cycle."""
+
+    def get(self, request, slug):
+        from . import onboarding
+
+        organization = _organization(slug)
+        with scoped(organization):
+            state = onboarding.status(organization)
+        return render(request, "ops/outputs/setup.html", {"organization": organization, **state})
+
+    def post(self, request, slug):
+        from apps.enrichment.llm.client import LLMInvalidOutput, LLMUnavailable
+        from apps.enrichment.llm.costs import CostCapExceeded
+
+        from . import onboarding
+
+        organization = _organization(slug)
+        action = request.POST.get("action") or ""
+        with scoped(organization):
+            try:
+                if action == "families":
+                    done = onboarding.assign_families(organization, actor_label=_actor(request))
+                    messages.success(
+                        request,
+                        f"Proposed {done['families']} families; {done['assigned']} listing(s) "
+                        f"assigned, {done['unassigned']} left. Review them on the draft profile, "
+                        "then make it live.")
+                elif action == "sources":
+                    done = onboarding.create_sources(organization, actor_label=_actor(request))
+                    messages.success(
+                        request,
+                        f"{done['created']} source(s) created from {done['families']} families; "
+                        f"{done['linked']} newly linked, shared podcasts included.")
+            except onboarding.OnboardingError as exc:
+                messages.error(request, str(exc))
+            except (CostCapExceeded, LLMUnavailable, LLMInvalidOutput) as exc:
+                messages.error(request, f"Could not propose families: {exc}")
+        return redirect(reverse("ops-cycle-setup", args=[slug]))

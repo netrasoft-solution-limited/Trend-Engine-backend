@@ -1,0 +1,57 @@
+{% extends "ops/base.html" %}
+{% block title %}Setup · {{ organization.name }}{% endblock %}
+{% block content %}
+  <h1>Set up {{ organization.name }}</h1>
+  <p class="lede">
+    What a brand needs before its research cycle runs like Jarrow's. Each step says
+    whether it is done. <a href="{% url 'ops-cycle' organization.slug %}">Research cycle →</a>
+  </p>
+
+  <div class="card">
+    <ol>
+      {% for label, done in steps %}
+        <li>{% if done %}<span class="pill live">done</span>{% else %}<span class="pill">to do</span>{% endif %} {{ label }}</li>
+      {% endfor %}
+    </ol>
+  </div>
+
+  <div class="card">
+    <span class="name">1. Catalogue</span>
+    <p class="note">
+      {% if working %}{{ listings }} listing(s) in profile v{{ working.number }}{% if working_is_draft %} (draft){% endif %}.{% else %}No profile yet.{% endif %}
+      Read the storefront, or import a catalogue inventory (columns <code>product</code> and
+      <code>primary_listening_family</code>), on the <a href="{% url 'ops-client' organization.slug %}">client page</a>.
+    </p>
+  </div>
+
+  <div class="card">
+    <span class="name">2. Listening families</span>
+    {% if unassigned %}
+      <p class="note">{{ unassigned }} listing(s) have no family. Propose families for the draft profile (one model call), then review them there.</p>
+      <form method="post">{% csrf_token %}<button type="submit" name="action" value="families">Propose families for the draft</button></form>
+    {% elif families %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Family</th><th class="num">Listings</th><th>Search query</th><th>Listening terms</th></tr></thead>
+        <tbody>{% for f in families %}<tr><td>{{ f.name }}</td><td class="num">{{ f.listings }}</td><td>{{ f.query }}</td><td class="muted">{{ f.terms|join:", " }}</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}
+      <p class="note">Import or read a catalogue first.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <span class="name">3. Make the profile live</span>
+    <p class="note">{% if live %}Live: v{{ live.number }}.{% else %}Not yet.{% endif %} Review and make it live on the <a href="{% url 'ops-client' organization.slug %}">client page</a>.</p>
+  </div>
+
+  <div class="card">
+    <span class="name">4. Sources</span>
+    <p class="note">{{ linked }} source(s) linked. Creates one standing search per live family on YouTube, TikTok, Instagram and Reddit, and links the shared podcast feeds. They collect when the brand's cycle runs.</p>
+    {% if live %}<form method="post">{% csrf_token %}<button type="submit" name="action" value="sources" class="secondary">Create and link sources from the families</button></form>{% endif %}
+  </div>
+
+  <div class="card">
+    <span class="name">5. First research cycle</span>
+    <p class="note">Start it on the <a href="{% url 'ops-cycle' organization.slug %}">research cycle page</a>.</p>
+  </div>
+{% endblock %}
