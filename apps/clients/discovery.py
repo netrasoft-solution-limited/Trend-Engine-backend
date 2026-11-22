@@ -146,7 +146,6 @@ def interpret(products: list[catalogue_reader.Product], *, transport=None) -> Di
     )
 
 
-@transaction.atomic
 def draft_from_catalogue(
     organization,
     *,
@@ -160,8 +159,16 @@ def draft_from_catalogue(
     the competitors and the strategy, and activates it — which is the step that
     makes it real, and the step a machine should not take.
     """
+    # The model call stays outside the transaction: a call that fails after it
+    # was billed must keep its ModelRun and cost record (22 Nov: a truncated
+    # catalogue answer was rolled back out of the spend ledger).
     discovered = interpret(products, transport=transport)
+    return _write(organization, products=products, discovered=discovered,
+                  actor_label=actor_label)
 
+
+@transaction.atomic
+def _write(organization, *, products, discovered, actor_label: str) -> tuple:
     version = services.draft(
         organization,
         label=f"Discovered from catalogue ({len(products)} products)",

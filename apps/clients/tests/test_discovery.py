@@ -454,3 +454,18 @@ def test_a_group_called_a_category_is_kept_as_a_listing():
     assert discovery._kind("category") == ClientAsset.Kind.PRODUCT
     assert discovery._kind("ingredient") == ClientAsset.Kind.INGREDIENT
     assert discovery._kind("nonsense") == ClientAsset.Kind.PRODUCT
+
+
+def test_a_failed_catalogue_call_keeps_its_cost_record(org_a, monkeypatch):
+    from apps.enrichment.models import ModelRun
+
+    def failing(products, *, transport=None):
+        ModelRun.objects.create(purpose="client_profile_discovery", model="m", outcome="failed",
+                                prompt_version="x", input_tokens=1, output_tokens=1, cost_usd=0)
+        raise RuntimeError("cut off")
+
+    monkeypatch.setattr(discovery, "interpret", failing)
+    with scoped(org_a), pytest.raises(RuntimeError):
+        discovery.draft_from_catalogue(org_a, products=[], actor_label="abu")
+
+    assert ModelRun.objects.filter(purpose="client_profile_discovery").exists()
