@@ -447,3 +447,10 @@ def test_a_mostly_successful_crawl_still_returns_what_it_found():
 def test_a_large_catalogue_has_room_to_be_answered():
     # 22 Nov: Nature's Way's 248 products were cut off under the 8,000 ceiling.
     assert discovery.catalogue_tier().max_output_tokens >= 20000
+
+
+def test_a_group_called_a_category_is_kept_as_a_listing():
+    # CATEGORY is a listening-family heading, left out of every catalogue match.
+    assert discovery._kind("category") == ClientAsset.Kind.PRODUCT
+    assert discovery._kind("ingredient") == ClientAsset.Kind.INGREDIENT
+    assert discovery._kind("nonsense") == ClientAsset.Kind.PRODUCT

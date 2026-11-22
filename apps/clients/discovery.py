@@ -103,6 +103,17 @@ class DiscoveredProfile(BaseModel):
 VALID_KINDS = {choice for choice, _label in ClientAsset.Kind.choices}
 
 
+def _kind(kind: str) -> str:
+    """A grouping the model calls a "category" is still something the brand
+    sells. In a profile, CATEGORY is a listening-family heading and is left out
+    of every catalogue match, so it is stored as a product (22 Nov: seven of
+    Nature's Way's groups, calcium and joint support among them, would have
+    vanished from the catalogue)."""
+    if kind in VALID_KINDS and kind != ClientAsset.Kind.CATEGORY:
+        return kind
+    return ClientAsset.Kind.PRODUCT
+
+
 def catalogue_tier() -> llm.Tier:
     """The extraction model with room for a large range. 8,000 tokens held a
     70-product catalogue; Nature's Way's 248 products were cut off at 13,000
@@ -171,7 +182,7 @@ def draft_from_catalogue(
                 organization=organization,
                 profile=version,
                 name=asset.name[:200],
-                kind=asset.kind if asset.kind in VALID_KINDS else ClientAsset.Kind.PRODUCT,
+                kind=_kind(asset.kind),
                 terms=terms,
                 weight=DEFAULT_WEIGHT,
                 notes="Discovered from the storefront. Confirm the weight before activating.",
