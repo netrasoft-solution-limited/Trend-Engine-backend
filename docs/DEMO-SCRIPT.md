@@ -1,130 +1,82 @@
-# Jarrow demo: both workflows, from saved evidence to export
+# Demo: Jarrow end to end, from a fresh research run to downloaded briefs
 
-Operator site: https://ops.geo.omnialta.com. Sign in with your operator account.
-Everything below is done in the browser. Steps marked **MANUAL** are the
-operator-assisted parts: a person decides or enters them, and the system records
-who did it and when.
+**Wed 2 Dec 2026, 11:00am ET.** Operator site: https://ops.geo.omnialta.com, signed in.
 
-Evidence sheets: `mark-demo-2026-10-23/` holds two CSVs built from the source lists
-of the two October briefs. Each row has the original link, date, labels and notes,
-and its provenance names the brief and source number.
+Mark asked for a demo that starts with a fresh research run, ends with both briefs generated and downloaded, and shows every manual step. There are exactly **three manual steps**, marked **MANUAL** below:
+1. start the cycle
+2. review
+3. draft the briefs
 
----
+Everything else runs by itself and is recorded.
 
-## 0. Before the demo (already done, shown briefly)
+Timings come from the first live cycle (20–21 Nov):
+- collection about 7 minutes
+- processing about 18 minutes
+- detection and the remaining automatic stages about 14 minutes
 
-1. **Clients → Jarrow Formulas.** The live profile is the full catalogue: 103
-   listings in 14 listening families, each listing with its family.
-2. **Observations.** The two sheets are imported (**MANUAL**: Download template →
-   fill → Import). Filter by topic, e.g. `spermidine`, to show the links, dates,
-   figure kinds and labels (advertisement, brand content, older material).
-   - A search estimate always shows its query, provider, geography and period.
-   - A figure with no public page (third-party keyword data) says "no public
-     link" and names where it came from.
+So start the cycle at the **beginning** of the call, and walk through the other screens while it runs.
 
-## 1. Existing-product case: protein and digestion
+## 0. Before the call (by 10:30am ET)
+- [ ] No cycle is running for Jarrow at https://ops.geo.omnialta.com/cycles/jarrow/.
+- [ ] The banner across the ops pages shows only known items: Reddit collecting nothing, and DataForSEO not configured if the account is still missing. Read it aloud. It is part of the story.
+- [ ] Open tabs:
+  - Cycle page: https://ops.geo.omnialta.com/cycles/jarrow/
+  - Collection runs: https://ops.geo.omnialta.com/runs/
+  - Detection runs: https://ops.geo.omnialta.com/runs/detection/
+  - Triage: https://ops.geo.omnialta.com/triage/jarrow/
+  - Opportunities: https://ops.geo.omnialta.com/opportunities/jarrow/
+- [ ] Clear the Downloads folder.
 
-1. **Triage → Jarrow Formulas.** The ranked queue for Jarrow. The rank is 60% how
-   much the development is moving and 40% how it touches Jarrow's products,
-   audiences and priorities. Confidence is shown separately.
-2. **Start a development from observations** (on Triage, **MANUAL**: an
-   analyst-led story, as the October brief was):
-   - title: `Protein that is easy to digest`
-   - observations: the ZOE episode, the two Reddit whey/bloating threads and the
-     Gut & Protein Optimizer page (O1–O4)
+## 1. Start the research cycle (2 min) — MANUAL
+1. Open the **cycle page**. Show the linked sources (80: YouTube, TikTok, Instagram, Reddit, podcasts) under "Sources linked to Jarrow Formulas".
+2. Click **Start a research cycle**. This is the only action needed to collect.
+3. The "Collect fresh research" stage shows "Collecting from N source(s)".
 
-   It is labelled analyst-led everywhere. Its status is earned from the
-   observations: two or more independent events in different weeks make it a
-   recurring discussion. If automatic collection detects the same story from
-   the ZOE transcript, review that signal instead and attach the observations
-   to it.
-3. Open the development (**Signal Review**):
-   - The evidence: quoted claims with timestamps and links, and contradicting
-     sources.
-   - **Observations** card (**MANUAL**): attach the Reddit and product-page
-     observations by number, e.g. `O12, O13, O14`. Independent events are counted
-     once.
-   - **Decide on the signal** (**MANUAL**): approve it.
-4. **Recommendation for Jarrow.** Draft it (one model call). Every action cites
-   claims (C) or observations (O), and only Jarrow products are named. Edit if needed (**MANUAL**), then
-   approve.
-   - *AI benchmark questions:* tie the relevant questions. Until the AI Brand
-     Test is imported, the brief says "not imported".
-5. **Draft a content brief** (button on the same page): the full content
-   package:
-   - plan, outline and evidence (E-numbers)
-   - guardrails
-   - Science Advisory Board specialty
-   - article draft
-   - product-page FAQs (Jarrow's products only)
-   - video script, email, social posts
-   - AI questions to win, what to measure
+## 2. While it collects: how the evidence is held (8 min)
+1. **Collection runs.** Show each source's run: collected, new, already seen. Then show the empty and failed runs. Reddit returns nothing, and the banner says so.
+2. **Detection runs.** Each run, worked or failed, with its model calls and cost. A failure turns the banner red on every page; two in a row email Mark.
+3. **A signal page** (Triage, then any story). Point out:
+   - dated sources
+   - older material labelled
+   - promotional posts kept out
+   - the status line with counts (current week against the 4-week baseline)
+   - the catalogue matches
 
-   Every piece is labelled as a draft for Jarrow Scientific Affairs review.
-6. **Triage → Draft the brief.** The Portfolio Trend Brief:
-   - about this brief, then the executive summary with its stories table
-   - the full portfolio by family (featured / watch / monitoring)
-   - each story with its evidence, observations, AI answers and content plan
-   - next steps, watch list, coverage and method
-   - numbered sources, cited inline as [n]
+## 3. Processing (show as it moves; about 18 min)
+- Back on the cycle page, the "Check relevance, transcribe, extract claims" stage counts down the items still waiting.
+- Open one new podcast or TikTok item from Collection runs and show:
+  - its transcript (or captions and comments)
+  - its claims with the quoted moment
+  - sponsor reads excluded
 
-## 2. New-product case: spermidine (test) and ergothioneine (monitor)
+## 4. Detection, recommendations, discovery (automatic; about 14 min)
+- **Detect:** new and extended signals, ranked for Jarrow.
+- **Recommend:** drafts for the best-ranked signals that have none. Show the guard: text that calls a non-measured story "rising" is refused.
+- **Discover:** ingredients the catalogue lacks (Opportunities, "Discovered this window"), and new current evidence attached to each candidate.
+- **Search:** refreshed volumes and Trends with retrieval dates if DataForSEO is set; otherwise "skipped", and the reason is on the page.
 
-1. **Triage → New-product candidates → Add a candidate** (**MANUAL**: the analyst
-   chooses candidates). Add `Spermidine`, with the theme `healthy aging`.
-   - The **gap check** runs at once: "Not found in the titles, terms or notes of
-     103 listings". The analyst records Jarrow's own confirmation when it
-     arrives.
-   - **Adjacent listings** are suggested from the theme (e.g. NMN, QH-absorb +
-     PQQ) and can be edited.
-2. **Observations** (**MANUAL**): attach the spermidine rows:
-   - the search estimates
-   - the Trends reading
-   - the feelgoodery podcast
-   - the Reddit requests
-   - the Primeadine Reel (labelled advertisement)
-   - the Black Forest TikTok Shop listing (global lifetime count)
-3. **The case.** *Draft from the observations* (one model call) proposes:
-   - the opening and why it could matter, citing O-numbers
-   - the test, next step and gate
-   - what the evidence does not show
+## 5. Review (5–10 min) — MANUAL
+The cycle stops at **Review** and lists every decision waiting, each with a link.
 
-   The analyst edits and sets the status **Test now** and priority 1
-   (**MANUAL**: commercial judgement, not a score). **Approve.**
-4. Repeat for `Ergothioneine`: status **Keep on watch**, priority 2, approve.
-5. **Draft the opportunity brief:**
-   - about this brief
-   - executive summary with the candidates table, the gap statement and the
-     decision needed
-   - search demand table (estimates never added together)
-   - cross-channel corroboration table (independent events; paid, brand and older
-     material named)
-   - one section per candidate, with its test and gate
-   - how to read the evidence
-   - numbered sources
+For each story to include, on its signal page:
+1. Click **Approve for Jarrow** on the recommendation.
+2. Click **Approved** under "Decide on the signal". Both approvals are needed for a story to appear in the trend brief.
 
-## 3. Review, export and the gates
+For each candidate, on its Opportunities page, read the case and click **Approve [name]**.
 
-1. **Outputs → the brief.** Each output is versioned:
-   - Approving a version is not publishing it.
-   - Health briefs need a named expert's sign-off before publication
-     (**MANUAL**: the Jarrow reviewer).
-2. **Export:** PDF, Word, HTML, Markdown or CSV.
-   - Each export carries the Pure Play Ecommerce Consulting branding, clickable
-     sources and tables.
-   - Unpublished drafts are watermarked "DRAFT — NOT PUBLISHED". A corrected
-     record carries its correction first.
-3. **Publish and deliver** are separate, recorded actions (**MANUAL**). "Sent" is
-   shown only when a delivery is recorded.
+Expert review stays separate. The briefs say no expert has reviewed them.
 
-## What is operator-assisted, and why
+## 6. Draft, export, send (5 min) — MANUAL
+1. On the cycle page, click **Draft both briefs from what is approved**. The page shows "Drafting…". Refresh after a minute or two.
+2. Open each brief from "Drafted". Show:
+   - the **written summary** and the **Decision summary**: status with counts, the story's type (existing product, portfolio gap, new format, new audience), the strongest evidence, Jarrow's products and the recommended action
+   - **What changed** since the last brief sent
+   - the appendices with every source dated and linked
+   - the coverage section with podcast figures and stated gaps
+3. Download the **PDF** and the **Word** file and open both. Point out the DRAFT watermark, the review status and the Pure Play and Jarrow logos.
+4. Click **Send for review**. Mark receives both files during the call. Email goes only to mark@omnialta.com.
 
-| Step | Who | Why |
-|---|---|---|
-| Social, Shop and search observations | Analyst, by CSV or form | No paid social or search access is authorised; every row keeps its link and labels |
-| AI benchmark answers | Analyst, CSV from the existing AI Brand Test | No new benchmark provider |
-| Candidate choice and priority | Analyst | Commercial judgement |
-| Profile weights and priorities | Analyst | Client knowledge |
-| Signal, recommendation and candidate approval | Analyst | Nothing reaches a brief unreviewed |
-| Expert sign-off | Named Jarrow reviewer | Health content needs a real expert |
-| Publish and deliver | Operator | Kept separate from drafting and approval |
+## 7. What to have ready
+- **Cost:** the first live cycle cost about $9 in AI and $2 in collection. The cycle page shows the cost of each run.
+- **Open items:** the DataForSEO account (search data), Reddit's route (official API, or an actor that needs a Reddit login), and the Nature's Way catalogue (for 9 Dec).
+- **If a stage fails:** the cycle stops, the page shows the reason, and the banner names it. Say so, show the record, and continue from the screens already done.
