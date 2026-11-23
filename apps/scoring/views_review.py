@@ -388,8 +388,11 @@ class SignalReviewView(View):
             )
             messages.info(request, "Approval withdrawn. Edit it, then approve again.")
         elif action == "rec.approve":
-            recommendations.decide(current, approve=True, actor_label=actor)
-            messages.success(request, "Approved. It can now go into a brief for this client.")
+            recommendations.approve_story(current, actor_label=actor)
+            messages.success(
+                request,
+                f"Approved, with {signal.code}. It will be in the next brief for this client.",
+            )
         elif action == "rec.reject":
             recommendations.decide(
                 current, approve=False, actor_label=actor, note=request.POST.get("note") or ""

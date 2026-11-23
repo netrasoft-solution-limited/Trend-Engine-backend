@@ -524,6 +524,33 @@ def decide(
 
 
 @transaction.atomic
+def approve_story(recommendation: Recommendation, *, actor_label: str) -> Recommendation:
+    """Approve the recommendation and, with it, the signal it is about.
+
+    A story reaches the trend brief only when both are approved. Two buttons on
+    one page were one decision taken twice, and the second was missed (21 Nov:
+    two stories left out of the brief). One click now records both, each in the
+    audit log. A rejected signal is refused rather than reopened silently.
+    """
+    from apps.intelligence import review
+
+    signal = recommendation.signal
+    if signal.state == Signal.State.REJECTED:
+        raise RecommendationError(
+            f"{signal.code} is rejected. Reopen the signal first if the story is real."
+        )
+    if signal.is_illustrative:
+        raise RecommendationError(f"{signal.code} is illustrative and cannot go into a brief.")
+    decide(recommendation, approve=True, actor_label=actor_label)
+    if signal.state != Signal.State.APPROVED:
+        review.move(
+            signal, Signal.State.APPROVED, actor_label=actor_label,
+            reason=f"Approved with the recommendation for {recommendation.organization.name}",
+        )
+    return recommendation
+
+
+@transaction.atomic
 def withdraw(recommendation: Recommendation, *, actor_label: str, note: str) -> Recommendation:
     """Take back an approval so the recommendation can be edited and decided again.
 

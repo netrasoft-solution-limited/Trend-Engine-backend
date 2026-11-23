@@ -58,9 +58,7 @@ So start the cycle at the **beginning** of the call, and walk through the other 
 ## 5. Review (5–10 min) — MANUAL
 The cycle stops at **Review** and lists every decision waiting, each with a link.
 
-For each story to include, on its signal page:
-1. Click **Approve for Jarrow** on the recommendation.
-2. Click **Approved** under "Decide on the signal". Both approvals are needed for a story to appear in the trend brief.
+For each story to include, open its signal page, read the recommendation against the evidence, and click **Approve for Jarrow**. One click approves both the recommendation and the signal, and both are recorded in the audit log. A rejected signal is refused, not reopened.
 
 For each candidate, on its Opportunities page, read the case and click **Approve [name]**.
 

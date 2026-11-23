@@ -245,3 +245,30 @@ def test_an_approval_can_be_withdrawn_with_a_reason_and_edited_again(
     from apps.operations.models import AuditEvent
     with scoped(jarrow):
         assert AuditEvent.objects.filter(message__startswith="Withdrew approval").exists()
+
+
+def test_one_click_approves_the_story_and_its_signal(client, operator, jarrow, proposed):
+    # 21 Nov: two stories were left out of the brief because only the
+    # recommendation was approved, not the signal.
+    client.force_login(operator)
+
+    post(client, jarrow, {"action": "rec.approve"})
+
+    with scoped(jarrow):
+        proposed.refresh_from_db()
+    assert proposed.state == Recommendation.State.APPROVED
+    assert Signal.objects.get(code="SIG-3001").state == Signal.State.APPROVED
+
+
+def test_a_rejected_signal_is_not_reopened_by_approving_its_recommendation(
+    client, operator, jarrow, proposed
+):
+    Signal.objects.filter(code="SIG-3001").update(state=Signal.State.REJECTED)
+    client.force_login(operator)
+
+    body = post(client, jarrow, {"action": "rec.approve"}).content.decode()
+
+    with scoped(jarrow):
+        proposed.refresh_from_db()
+    assert proposed.state == Recommendation.State.PROPOSED
+    assert "Reopen the signal first" in body

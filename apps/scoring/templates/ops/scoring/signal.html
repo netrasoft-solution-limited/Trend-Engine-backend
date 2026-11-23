@@ -253,7 +253,7 @@ operator decide each of those.
             <button type="submit" name="action" value="rec.reject" class="secondary">Reject</button>
           </form>
         </div>
-        <p class="note">Approving is not sending. It makes this available to a brief, which still goes through approval and the publication gate.</p>
+        <p class="note">Approving also approves the signal, so the story goes into the next brief. Approving is not sending: the brief still goes through approval and the publication gate.</p>
       {% elif recommendation.state == "approved" %}
         <form method="post" class="inline" style="margin-top:12px">{% csrf_token %}
           <input type="text" name="note" placeholder="Why withdraw the approval?" style="width:260px">
